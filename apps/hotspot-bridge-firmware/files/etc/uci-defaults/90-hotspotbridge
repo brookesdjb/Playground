@@ -1,0 +1,32 @@
+#!/bin/sh
+# Hotspot Bridge: first-boot network/firewall/DNS defaults.
+# Wireless is handled separately by /usr/libexec/hotspotbridge/ensure-wifi
+# because the radios may not be registered yet when uci-defaults run.
+
+uci -q batch <<'EOF'
+set system.@system[0].hostname='hotspotbridge'
+set network.lan.ipaddr='192.168.88.1'
+set network.lan.netmask='255.255.255.0'
+set network.wwan=interface
+set network.wwan.proto='dhcp'
+set network.wwan6=interface
+set network.wwan6.proto='dhcpv6'
+set network.wwan6.device='@wwan'
+set dhcp.@dnsmasq[0].rebind_protection='0'
+EOF
+
+# Put the Wi-Fi uplink into the firewall "wan" zone (NAT + masquerade).
+for z in $(uci show firewall | sed -n "s/^firewall\.\([^.]*\)\.name='wan'$/\1/p"); do
+	uci -q del_list firewall."$z".network='wwan'
+	uci -q del_list firewall."$z".network='wwan6'
+	uci add_list firewall."$z".network='wwan'
+	uci add_list firewall."$z".network='wwan6'
+done
+
+uci commit system
+uci commit network
+uci commit dhcp
+uci commit firewall
+
+/etc/init.d/hotspotbridge enable
+exit 0

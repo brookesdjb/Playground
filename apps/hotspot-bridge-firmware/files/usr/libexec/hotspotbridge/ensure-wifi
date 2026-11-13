@@ -1,0 +1,89 @@
+#!/bin/sh
+# Create the Hotspot Bridge wireless layout for every radio that exists:
+#   setup_<radio>  "setup" AP on that radio, bridged to LAN (open unless a
+#                  setup password was saved in the web UI)
+#   uplink         client (STA) interface -> network "wwan", disabled until
+#                  configured in the web UI
+# Idempotent: radios that already have a setup_<radio> section are left alone,
+# so it is safe to run from boot and from every ieee80211 hotplug event.
+
+exec 9>/var/lock/hotspotbridge-wifi.lock
+flock 9
+
+[ -f /etc/board.json ] && /sbin/wifi config >/dev/null 2>&1
+
+radios=$(uci -q show wireless | sed -n "s/^wireless\.\([^.]*\)=wifi-device$/\1/p")
+[ -n "$radios" ] || exit 1
+
+ssid=$(uci -q get hotspotbridge.main.setup_ssid)
+if [ -z "$ssid" ]; then
+	mac=$(tr -d ':' < /sys/class/net/eth0/address 2>/dev/null | tr 'a-f' 'A-F')
+	ssid="HotspotBridge-$(echo "$mac" | tail -c 5)"
+	uci set hotspotbridge.main.setup_ssid="$ssid"
+	uci commit hotspotbridge
+fi
+key=$(uci -q get hotspotbridge.main.setup_key)
+
+# OpenWrt leaves the country empty (= world domain "00"), where 5 GHz is
+# passive-only and an AP cannot start. Use our default; changeable in the UI.
+country=$(uci -q get hotspotbridge.main.country)
+[ -n "$country" ] || country=GB
+
+changed=0
+first2g=""
+for r in $radios; do
+	band=$(uci -q get wireless."$r".band)
+	[ "$band" = "2g" ] && [ -z "$first2g" ] && first2g="$r"
+
+	s="setup_$r"
+	[ "$(uci -q get wireless."$s")" = "wifi-iface" ] && continue
+
+	# Replace OpenWrt's disabled "OpenWrt" default interface for this radio.
+	uci -q delete wireless.default_"$r"
+	uci set wireless."$r".disabled='0'
+	[ -n "$(uci -q get wireless."$r".country)" ] || uci set wireless."$r".country="$country"
+
+	case "$band" in
+		2g) ifn="hbap2g" ;;
+		5g) ifn="hbap5g" ;;
+		*)  ifn="hbap$band" ;;
+	esac
+	uci set wireless."$s"=wifi-iface
+	uci set wireless."$s".device="$r"
+	uci set wireless."$s".mode='ap'
+	uci set wireless."$s".network='lan'
+	uci set wireless."$s".ifname="$ifn"
+	uci set wireless."$s".ssid="$ssid"
+	if [ -n "$key" ]; then
+		uci set wireless."$s".encryption='psk2'
+		uci set wireless."$s".key="$key"
+	else
+		uci set wireless."$s".encryption='none'
+	fi
+	# Don't put a setup AP on the radio the uplink already uses.
+	if [ "$(uci -q get wireless.uplink.device)" = "$r" ] && [ "$(uci -q get wireless.uplink.disabled)" = "0" ]; then
+		uci set wireless."$s".disabled='1'
+	else
+		uci set wireless."$s".disabled='0'
+	fi
+	changed=1
+done
+[ -n "$first2g" ] || first2g=$(echo "$radios" | head -n1)
+
+if [ "$(uci -q get wireless.uplink)" != "wifi-iface" ]; then
+	uci set wireless.uplink=wifi-iface
+	uci set wireless.uplink.device="$first2g"
+	uci set wireless.uplink.mode='sta'
+	uci set wireless.uplink.network='wwan'
+	uci set wireless.uplink.ifname='hbsta'
+	uci set wireless.uplink.ssid=''
+	uci set wireless.uplink.encryption='none'
+	uci set wireless.uplink.disabled='1'
+	changed=1
+fi
+
+if [ "$changed" = 1 ]; then
+	uci commit wireless
+	/sbin/wifi reload >/dev/null 2>&1
+fi
+exit 0

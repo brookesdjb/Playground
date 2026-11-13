@@ -1,0 +1,317 @@
+#!/bin/sh
+# Hotspot Bridge web API (served by uhttpd as /cgi-bin/hb?a=<action>).
+# GET : status, scan, check, backup
+# POST: connect, disconnect, setup, country, restore_stock, upgrade, reboot
+# POSTs must carry the header "X-HB: 1" (blocks cross-site form posts).
+
+. /usr/share/libubox/jshn.sh
+
+UPLOAD=/tmp/hb-upload.bin
+STAGE=/tmp/hb-flash.bin
+FW_SIZE=7995392        # 0x7A0000: size of the "firmware" flash partition
+FW_BLOCKS=15616        # FW_SIZE / 512
+STOCK_HWID=0902ac04    # hardware id in TP-Link's own TL-WR902AC v4 images
+MAX_UPLOAD=9437184
+
+out() {
+	printf 'Status: %s\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n\r\n' "${2:-200 OK}"
+	printf '%s\n' "$1"
+	exit 0
+}
+err() { json_init; json_add_boolean ok 0; json_add_string error "$1"; out "$(json_dump)" "${2:-400 Bad Request}"; }
+okmsg() { json_init; json_add_boolean ok 1; json_add_string message "$1"; out "$(json_dump)"; }
+
+# Query-string values here are simple tokens; strip anything else.
+qs() { echo "$QUERY_STRING" | tr '&' '\n' | sed -n "s/^$1=//p" | head -n1 | tr -cd 'a-zA-Z0-9_-'; }
+
+require_post() {
+	[ "$REQUEST_METHOD" = "POST" ] || err "POST required" "405 Method Not Allowed"
+	[ "$HTTP_X_HB" = "1" ] || err "Missing X-HB header" "403 Forbidden"
+}
+read_json() {
+	require_post
+	BODY=$(head -c "${CONTENT_LENGTH:-0}")
+}
+jget() { jsonfilter -s "$BODY" -e "@.$1" 2>/dev/null; }
+hexbytes() { hexdump -v -s "$2" -n "$3" -e '1/1 "%02x"' "$1"; }
+is_radio() { [ -n "$1" ] && [ "$(uci -q get wireless."$1")" = "wifi-device" ]; }
+radios() { uci -q show wireless | sed -n "s/^wireless\.\([^.]*\)=wifi-device$/\1/p"; }
+setup_ifaces() { uci -q show wireless | sed -n "s/^wireless\.\(setup_[^.]*\)=wifi-iface$/\1/p"; }
+reload_wifi_later() { setsid sh -c 'sleep 1; /sbin/wifi reload' </dev/null >/dev/null 2>&1 & }
+
+valid_key() { # $1=encryption $2=key
+	case "$1" in
+		none|owe) return 0 ;;
+	esac
+	if [ "${#2}" -eq 64 ]; then
+		echo "$2" | grep -qE '^[0-9a-fA-F]{64}$'
+		return
+	fi
+	[ "${#2}" -ge 8 ] && [ "${#2}" -le 63 ]
+}
+
+# ---------------------------------------------------------------- GET actions
+
+a_status() {
+	local wwan sta base r band phy
+	wwan=$(ubus call network.interface.wwan status 2>/dev/null); [ -n "$wwan" ] || wwan=null
+	sta=$(ubus call iwinfo info '{"device":"hbsta"}' 2>/dev/null); [ -n "$sta" ] || sta=null
+
+	json_init
+	json_add_boolean ok 1
+	json_add_string hostname "$(uci -q get system.@system[0].hostname)"
+	json_add_string release "$(. /etc/openwrt_release 2>/dev/null; echo "$DISTRIB_DESCRIPTION")"
+	json_add_string lan_ip "$(uci -q get network.lan.ipaddr)"
+	json_add_string client_ip "$REMOTE_ADDR"
+	json_add_string client_mac "$(awk -v ip="$REMOTE_ADDR" '$1==ip {print $4}' /proc/net/arp)"
+
+	json_add_object uplink
+	json_add_boolean enabled "$([ "$(uci -q get wireless.uplink.disabled)" = "0" ] && echo 1 || echo 0)"
+	json_add_string radio "$(uci -q get wireless.uplink.device)"
+	json_add_string ssid "$(uci -q get wireless.uplink.ssid)"
+	json_add_string bssid "$(uci -q get wireless.uplink.bssid)"
+	json_add_string encryption "$(uci -q get wireless.uplink.encryption)"
+	json_add_string macaddr "$(uci -q get wireless.uplink.macaddr)"
+	json_add_string actual_mac "$(cat /sys/class/net/hbsta/address 2>/dev/null)"
+	json_close_object
+
+	json_add_object setup
+	json_add_string ssid "$(uci -q get hotspotbridge.main.setup_ssid)"
+	json_add_boolean secured "$([ -n "$(uci -q get hotspotbridge.main.setup_key)" ] && echo 1 || echo 0)"
+	json_close_object
+
+	json_add_array radios
+	for r in $(radios); do
+		band=$(uci -q get wireless."$r".band)
+		phy=$(iwinfo nl80211 phyname "$r" 2>/dev/null)
+		json_add_object
+		json_add_string name "$r"
+		json_add_string band "$band"
+		json_add_string channel "$(uci -q get wireless."$r".channel)"
+		json_add_string country "$(uci -q get wireless."$r".country)"
+		json_add_string phy_mac "$(cat /sys/class/ieee80211/"$phy"/macaddress 2>/dev/null)"
+		json_close_object
+	done
+	json_close_array
+
+	base=$(json_dump | sed 's/ *}$//')
+	out "$base, \"wwan\": $wwan, \"sta\": $sta }"
+}
+
+a_scan() {
+	local r ifn res
+	r=$(qs radio)
+	is_radio "$r" || err "Unknown radio"
+	ifn=$(ubus call network.wireless status 2>/dev/null | jsonfilter -e "@.$r.interfaces[*].ifname" 2>/dev/null | head -n1)
+	[ -n "$ifn" ] || err "No active interface on $r to scan with - wait a few seconds and retry"
+	res=$(ubus -t 25 call iwinfo scan "{\"device\":\"$ifn\"}" 2>/dev/null)
+	[ -n "$res" ] || err "Scan failed (radio busy) - try again"
+	out "{ \"ok\": true, \"radio\": \"$r\", \"scan\": $res }"
+}
+
+a_check() {
+	local ping_ok status verdict
+	ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1 && ping_ok=1 || ping_ok=0
+	status=$(uclient-fetch -T 6 -q -S -O /dev/null http://connectivitycheck.gstatic.com/generate_204 2>&1 \
+		| grep -m1 -o 'HTTP/[0-9.]* [0-9][0-9][0-9]')
+	case "$status" in
+		*" 204") verdict=online ;;
+		"") [ "$ping_ok" = 1 ] && verdict=no_http || verdict=offline ;;
+		*) verdict=captive ;;
+	esac
+	json_init
+	json_add_boolean ok 1
+	json_add_boolean ping "$ping_ok"
+	json_add_string http "$status"
+	json_add_string verdict "$verdict"
+	out "$(json_dump)"
+}
+
+mtd_dev() { sed -n "s/^\(mtd[0-9]*\):.*\"$1\"\$/\1/p" /proc/mtd | head -n1; }
+
+a_backup() {
+	local part devs d p mac
+	part=$(qs part)
+	case "$part" in
+		boot|firmware|config|factory) devs=$(mtd_dev "$part") ;;
+		all) for p in boot firmware config factory; do d=$(mtd_dev "$p"); [ -n "$d" ] || err "Partition $p not found"; devs="$devs $d"; done ;;
+		*) err "Unknown partition" ;;
+	esac
+	[ -n "$devs" ] || err "Partition not found"
+	mac=$(tr -d ':' < /sys/class/net/eth0/address)
+	printf 'Content-Type: application/octet-stream\r\nContent-Disposition: attachment; filename="tl-wr902ac-v4-%s-%s.bin"\r\nCache-Control: no-store\r\n\r\n' "$part" "$mac"
+	for d in $devs; do cat "/dev/$d"; done
+	exit 0
+}
+
+# ---------------------------------------------------------------- POST actions
+
+a_connect() {
+	read_json
+	local ssid key enc r mac bssid first s
+	ssid=$(jget ssid); key=$(jget key); enc=$(jget encryption); r=$(jget radio)
+	mac=$(jget macaddr | tr 'A-F-' 'a-f:'); bssid=$(jget bssid | tr 'A-F-' 'a-f:')
+
+	[ -n "$ssid" ] && [ "${#ssid}" -le 32 ] || err "Network name must be 1-32 characters"
+	is_radio "$r" || err "Unknown radio"
+	case "$enc" in
+		none|owe|psk|psk2|psk-mixed|sae|sae-mixed) ;;
+		*) err "Unsupported security type: $enc" ;;
+	esac
+	valid_key "$enc" "$key" || err "Password must be 8-63 characters (or 64 hex digits)"
+	if [ -n "$mac" ]; then
+		echo "$mac" | grep -qE '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$' || err "MAC address must look like aa:bb:cc:dd:ee:ff"
+		first=$(echo "$mac" | cut -c1-2)
+		[ $((0x$first & 1)) -eq 0 ] || err "That is a multicast MAC (first byte is odd) - it cannot be used"
+		[ "$mac" != "00:00:00:00:00:00" ] || err "Invalid MAC address"
+	fi
+	if [ -n "$bssid" ]; then
+		echo "$bssid" | grep -qE '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$' || bssid=""
+	fi
+
+	uci set wireless.uplink.device="$r"
+	uci set wireless.uplink.ssid="$ssid"
+	uci set wireless.uplink.encryption="$enc"
+	case "$enc" in
+		none|owe) uci -q delete wireless.uplink.key ;;
+		*) uci set wireless.uplink.key="$key" ;;
+	esac
+	if [ -n "$mac" ]; then uci set wireless.uplink.macaddr="$mac"; else uci -q delete wireless.uplink.macaddr; fi
+	if [ -n "$bssid" ]; then uci set wireless.uplink.bssid="$bssid"; else uci -q delete wireless.uplink.bssid; fi
+	uci set wireless.uplink.disabled='0'
+
+	# Keep the setup network only on the *other* radio(s): the uplink radio must
+	# follow the hotspot's channel and is happier with a single interface.
+	if [ "$(radios | wc -l)" -gt 1 ]; then
+		for s in $(setup_ifaces); do
+			if [ "$(uci -q get wireless."$s".device)" = "$r" ]; then
+				uci set wireless."$s".disabled='1'
+			else
+				uci set wireless."$s".disabled='0'
+			fi
+		done
+	fi
+	uci commit wireless
+	reload_wifi_later
+	okmsg "Connecting to \"$ssid\". If you were on the setup Wi-Fi on the same band you will drop off for a few seconds."
+}
+
+a_disconnect() {
+	read_json
+	local s
+	uci set wireless.uplink.disabled='1'
+	for s in $(setup_ifaces); do uci set wireless."$s".disabled='0'; done
+	uci commit wireless
+	reload_wifi_later
+	okmsg "Uplink disabled. The setup network is back on all bands."
+}
+
+a_setup() {
+	read_json
+	local ssid key s
+	ssid=$(jget ssid); key=$(jget key)
+	[ -n "$ssid" ] && [ "${#ssid}" -le 32 ] || err "Network name must be 1-32 characters"
+	[ -z "$key" ] || valid_key psk2 "$key" || err "Password must be 8-63 characters (leave empty for an open network)"
+	uci set hotspotbridge.main.setup_ssid="$ssid"
+	uci set hotspotbridge.main.setup_key="$key"
+	for s in $(setup_ifaces); do
+		uci set wireless."$s".ssid="$ssid"
+		if [ -n "$key" ]; then
+			uci set wireless."$s".encryption='psk2'
+			uci set wireless."$s".key="$key"
+		else
+			uci set wireless."$s".encryption='none'
+			uci -q delete wireless."$s".key
+		fi
+	done
+	uci commit hotspotbridge
+	uci commit wireless
+	reload_wifi_later
+	okmsg "Setup network updated. Reconnect to \"$ssid\"."
+}
+
+a_country() {
+	read_json
+	local c r
+	c=$(jget country | tr 'a-z' 'A-Z')
+	echo "$c" | grep -qE '^([A-Z]{2}|00)$' || err "Country must be a 2-letter code like GB, US, DE (or 00)"
+	for r in $(radios); do uci set wireless."$r".country="$c"; done
+	uci set hotspotbridge.main.country="$c"
+	uci commit hotspotbridge
+	uci commit wireless
+	reload_wifi_later
+	okmsg "Wi-Fi country set to $c."
+}
+
+recv_upload() {
+	require_post
+	local len=${CONTENT_LENGTH:-0}
+	[ "$len" -gt 0 ] 2>/dev/null && [ "$len" -le "$MAX_UPLOAD" ] || err "Upload must be between 1 byte and 9 MB"
+	rm -f "$UPLOAD" "$STAGE"
+	sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+	head -c "$len" > "$UPLOAD"
+	[ "$(wc -c < "$UPLOAD")" -eq "$len" ] || { rm -f "$UPLOAD"; err "Upload was incomplete - try again"; }
+}
+
+flash_later() { # $1 = sysupgrade arguments (image path last)
+	setsid sh -c "sleep 3; exec /sbin/sysupgrade $1" </dev/null >/tmp/hb-sysupgrade.log 2>&1 &
+}
+
+a_restore_stock() {
+	recv_upload
+	local size skip hw rofs magic
+	size=$(wc -c < "$UPLOAD")
+	case "$size" in
+		8126976) skip=257 ;;  # TP-Link download: 512 B header + 128 KiB bootloader + firmware
+		8126464) skip=256 ;;  # TFTP-recovery layout: 128 KiB bootloader + firmware
+		7995392) skip=0 ;;    # already stripped to the firmware partition
+		8127024) rm -f "$UPLOAD"; err "This is TP-Link's newer ENCRYPTED release (0.9.3, 2025 or later), which can't be written from here. Use the 0.9.1 release (TL-WR902ACv4_EU_0.9.1_0.3_up_boot[240903-rel41878]) instead, then update to the newest version from TP-Link's own web page afterwards." ;;
+		*) rm -f "$UPLOAD"; err "Unexpected file size ($size bytes). Expected the TL-WR902AC v4 stock .bin from TP-Link." ;;
+	esac
+	dd if="$UPLOAD" of="$STAGE" bs=512 skip="$skip" count="$FW_BLOCKS" 2>/dev/null
+	rm -f "$UPLOAD"
+	[ "$(wc -c < "$STAGE")" -eq "$FW_SIZE" ] || { rm -f "$STAGE"; err "Could not prepare image"; }
+	magic=$(hexdump -v -s 4 -n 8 -e '8/1 "%c"' "$STAGE")
+	[ "$magic" = "ver. 2.0" ] || { rm -f "$STAGE"; err "Not a TP-Link firmware image (header missing)"; }
+	hw=$(hexbytes "$STAGE" 52 4)
+	[ "$hw" = "$STOCK_HWID" ] || { rm -f "$STAGE"; err "Hardware ID $hw is not TL-WR902AC v4 stock ($STOCK_HWID). Refusing to flash."; }
+	rofs=$((0x$(hexbytes "$STAGE" 124 4)))
+	[ "$rofs" -gt 0 ] && [ "$rofs" -lt "$FW_SIZE" ] || { rm -f "$STAGE"; err "Corrupt header (rootfs offset)"; }
+	[ "$(hexdump -v -s "$rofs" -n 4 -e '4/1 "%c"' "$STAGE")" = "hsqs" ] || { rm -f "$STAGE"; err "No readable root filesystem in this file (encrypted or damaged). Use the 0.9.1 stock release."; }
+
+	flash_later "-F -n $STAGE"
+	okmsg "Stock image verified. Writing TP-Link firmware now - do NOT unplug for 3 minutes. The router will come back as stock TP-Link (default address http://192.168.0.254 or http://tplinkwifi.net)."
+}
+
+a_upgrade() {
+	recv_upload
+	local keep msg
+	keep=$(qs keep)
+	if ! msg=$(/sbin/sysupgrade -T "$UPLOAD" 2>&1); then
+		rm -f "$UPLOAD"
+		err "Image rejected: $(echo "$msg" | tail -n 3 | tr '\n' ' ')"
+	fi
+	if [ "$keep" = "1" ]; then flash_later "$UPLOAD"; else flash_later "-n $UPLOAD"; fi
+	okmsg "Image accepted. Flashing now - do NOT unplug for 3 minutes."
+}
+
+a_reboot() {
+	read_json
+	setsid sh -c 'sleep 1; reboot' </dev/null >/dev/null 2>&1 &
+	okmsg "Rebooting. Give it about a minute."
+}
+
+case "$(qs a)" in
+	status) a_status ;;
+	scan) a_scan ;;
+	check) a_check ;;
+	backup) a_backup ;;
+	connect) a_connect ;;
+	disconnect) a_disconnect ;;
+	setup) a_setup ;;
+	country) a_country ;;
+	restore_stock) a_restore_stock ;;
+	upgrade) a_upgrade ;;
+	reboot) a_reboot ;;
+	*) err "Unknown action" "404 Not Found" ;;
+esac

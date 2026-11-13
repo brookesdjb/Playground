@@ -1,0 +1,5 @@
+config hotspotbridge 'main'
+	# Wi-Fi regulatory country applied to new radios (change in the web UI)
+	option country 'GB'
+	option setup_ssid ''
+	option setup_key ''

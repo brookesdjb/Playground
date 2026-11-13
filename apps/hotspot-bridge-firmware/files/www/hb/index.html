@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hotspot Bridge</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#1d2330;--muted:#5d6676;--line:#dde1e7;--accent:#1f6feb;--ok:#1a7f37;--warn:#9a6700;--bad:#cf222e;--chip:#eef1f5}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1218;--card:#171b23;--fg:#e6e9ef;--muted:#99a1ae;--line:#2a303b;--accent:#4c8dff;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--chip:#222833}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 2px}
+h2{font-size:16px;margin:0 0 10px}
+.sub{color:var(--muted);margin:0 0 14px;font-size:13px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+input,select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--fg);font:inherit}
+input[type=checkbox]{width:auto}
+input[type=file]{padding:6px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>*{flex:1 1 200px}
+button{padding:9px 14px;border-radius:7px;border:1px solid var(--accent);background:var(--accent);color:#fff;font:inherit;cursor:pointer}
+button.ghost{background:transparent;color:var(--accent)}
+button.danger{background:var(--bad);border-color:var(--bad)}
+button:disabled{opacity:.5;cursor:default}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:14px}
+.kv dt{color:var(--muted)}.kv dd{margin:0;word-break:break-all}
+.pill{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;font-weight:600;background:var(--chip)}
+.pill.ok{color:var(--ok)}.pill.warn{color:var(--warn)}.pill.bad{color:var(--bad)}
+.msg{margin-top:10px;font-size:14px;padding:8px 10px;border-radius:7px;background:var(--chip);display:none}
+.msg.show{display:block}.msg.err{color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+td,th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--muted);font-weight:500;font-size:12px}
+tr.pick{cursor:pointer}tr.pick:hover{background:var(--chip)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.hint{font-size:13px;color:var(--muted);margin:6px 0 0}
+details summary{cursor:pointer;color:var(--accent);font-size:14px}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<main>
+<h1>Hotspot Bridge</h1>
+<p class="sub">TL-WR902AC v4 &middot; connect to a Wi-Fi hotspot and share it over Ethernet &middot; <span id="rel"></span></p>
+
+<section>
+<h2>Status</h2>
+<dl class="kv">
+<dt>Uplink</dt><dd id="s-up">&hellip;</dd>
+<dt>Network</dt><dd id="s-ssid">&ndash;</dd>
+<dt>Signal</dt><dd id="s-sig">&ndash;</dd>
+<dt>Uplink MAC</dt><dd id="s-mac" class="mono">&ndash;</dd>
+<dt>Uplink IP</dt><dd id="s-ip" class="mono">&ndash;</dd>
+<dt>Internet</dt><dd id="s-net">not checked</dd>
+</dl>
+<div class="btns">
+<button class="ghost" id="b-check">Check internet</button>
+<button class="ghost" id="b-disc">Disconnect uplink</button>
+</div>
+<div class="msg" id="m-status"></div>
+</section>
+
+<section>
+<h2>Connect to a hotspot</h2>
+<div class="row">
+<div><label for="c-radio">Band</label><select id="c-radio"></select></div>
+<div style="flex:0 0 auto;align-self:flex-end"><button class="ghost" id="b-scan">Scan</button></div>
+</div>
+<table id="scan" hidden><thead><tr><th>Network</th><th>Signal</th><th>Ch</th><th>Security</th></tr></thead><tbody></tbody></table>
+<p class="hint" id="scan-hint"></p>
+
+<label for="c-ssid">Network name (SSID)</label>
+<input id="c-ssid" autocomplete="off" maxlength="32">
+<div class="row">
+<div><label for="c-enc">Security</label>
+<select id="c-enc">
+<option value="none">Open (no password)</option>
+<option value="owe">Enhanced Open (OWE)</option>
+<option value="psk2">WPA2-Personal</option>
+<option value="sae-mixed">WPA2/WPA3-Personal</option>
+<option value="sae">WPA3-Personal</option>
+<option value="psk-mixed">WPA/WPA2-Personal</option>
+</select></div>
+<div><label for="c-key">Password</label><input id="c-key" type="password" autocomplete="off"></div>
+</div>
+
+<label for="c-mac">Use this MAC address on the uplink (clone your laptop)</label>
+<input id="c-mac" class="mono" placeholder="aa:bb:cc:dd:ee:ff  (empty = router's own)" autocomplete="off">
+<p class="hint">Enter the Wi-Fi MAC your laptop used <b>on the hotspot network</b>. Phones and laptops often use a
+private/random MAC per network, so read it from that network's details (Windows: Wi-Fi &rarr; hotspot &rarr; Properties
+&rarr; "Physical address"/"Random hardware address"; macOS: Wi-Fi &rarr; Details &rarr; "Wi-Fi address"; Linux: <span class="mono">ip link</span>).
+<span id="mymac"></span></p>
+<label><input type="checkbox" id="c-lock"> Lock to the selected access point (BSSID <span id="c-bssid" class="mono">&ndash;</span>)</label>
+
+<div class="btns"><button id="b-conn">Connect</button></div>
+<div class="msg" id="m-conn"></div>
+<details style="margin-top:12px"><summary>How the MAC trick works</summary>
+<ol class="hint">
+<li>Log in to the hotspot's captive portal on your laptop as normal.</li>
+<li>Note the laptop's Wi-Fi MAC for that network, then <b>disconnect the laptop from the hotspot</b> (and turn off auto-join) &mdash; two devices with one MAC on the same hotspot will fight.</li>
+<li>Enter the hotspot and that MAC here, press Connect. The hotspot sees the "same" device that already logged in.</li>
+<li>Plug the laptop into the router's Ethernet port (or join the setup Wi-Fi) and press "Check internet".</li>
+</ol>
+<p class="hint">Alternative without cloning: leave the MAC empty, connect, note the "Uplink MAC" above, then set your laptop's MAC to that value and log in to the portal from the laptop.</p>
+</details>
+</section>
+
+<section>
+<h2>Setup Wi-Fi (this router's own network)</h2>
+<div class="row">
+<div><label for="w-ssid">Name</label><input id="w-ssid" maxlength="32"></div>
+<div><label for="w-key">Password (empty = open)</label><input id="w-key" type="password" autocomplete="new-password"></div>
+</div>
+<div class="row">
+<div><label for="w-country">Wi-Fi country code</label><input id="w-country" maxlength="2" placeholder="GB, US, DE&hellip;"></div>
+<div style="flex:0 0 auto;align-self:flex-end"><button class="ghost" id="b-country">Set country</button></div>
+</div>
+<div class="btns"><button id="b-setup">Save setup Wi-Fi</button></div>
+<p class="hint">Router address: <span class="mono" id="lanip">192.168.88.1</span>. The setup network is switched off on whichever band the uplink uses; it stays on the other band and Ethernet always works.</p>
+<div class="msg" id="m-setup"></div>
+</section>
+
+<section>
+<h2>Firmware</h2>
+<p class="hint" style="margin-top:0"><b>Back up first</b> (once): the <i>factory</i> partition holds this unit's Wi-Fi calibration and MAC address.</p>
+<div class="btns">
+<button class="ghost" data-part="factory">Download factory</button>
+<button class="ghost" data-part="all">Download full 8 MB flash</button>
+</div>
+
+<label for="f-stock">Restore TP-Link stock firmware</label>
+<input type="file" id="f-stock" accept=".bin">
+<p class="hint">Use TP-Link's <b>0.9.1</b> image for TL-WR902AC v4 (e.g. <span class="mono">TL-WR902ACv4_EU_0.9.1_0.3_up_boot[240903-rel41878]…bin</span>) &mdash; the newer 0.9.3 files are encrypted and are refused. The bootloader and calibration data are never touched.</p>
+<div class="btns"><button class="danger" id="b-stock">Restore stock firmware</button></div>
+
+<label for="f-up">Install a Hotspot Bridge / OpenWrt sysupgrade image</label>
+<input type="file" id="f-up" accept=".bin">
+<label><input type="checkbox" id="f-keep"> Keep current settings</label>
+<div class="btns"><button id="b-up">Flash image</button><button class="ghost" id="b-reboot">Reboot</button></div>
+<div class="msg" id="m-fw"></div>
+<p class="hint">Advanced settings (full OpenWrt LuCI): <a href="/cgi-bin/luci/">/cgi-bin/luci</a> &mdash; user <span class="mono">root</span>, no password until you set one.</p>
+</section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const API = '/cgi-bin/hb?a=';
+let S = null, selBssid = '';
+
+function show(id, text, isErr) {
+  const m = $(id); m.textContent = text; m.className = 'msg show' + (isErr ? ' err' : '');
+}
+async function get(a) {
+  const r = await fetch(API + a, {cache: 'no-store'});
+  return r.json();
+}
+async function post(a, body, raw) {
+  const opts = {method: 'POST', headers: {'X-HB': '1'}, body: raw ? body : JSON.stringify(body || {})};
+  opts.headers['Content-Type'] = raw ? 'application/octet-stream' : 'application/json';
+  const r = await fetch(API + a, opts);
+  return r.json();
+}
+function busy(btn, on) { btn.disabled = on; }
+
+function bandName(b) { return b === '2g' ? '2.4 GHz' : b === '5g' ? '5 GHz' : b; }
+
+async function refresh() {
+  try { S = await get('status'); } catch (e) { $('s-up').innerHTML = '<span class="pill bad">router unreachable</span>'; return; }
+  $('rel').textContent = S.release || '';
+  $('lanip').textContent = S.lan_ip;
+  const sel = $('c-radio');
+  if (!sel.options.length) {
+    S.radios.forEach(r => sel.add(new Option(bandName(r.band) + ' (' + r.name + ')', r.name)));
+    if (S.uplink.radio) sel.value = S.uplink.radio;
+    $('w-ssid').value = S.setup.ssid;
+    $('w-country').value = (S.radios[0] && S.radios[0].country) || '';
+    if (S.uplink.ssid) $('c-ssid').value = S.uplink.ssid;
+    if (S.uplink.encryption) $('c-enc').value = S.uplink.encryption;
+    if (S.uplink.macaddr) $('c-mac').value = S.uplink.macaddr;
+  }
+  if (S.client_mac) $('mymac').innerHTML = ' The device you are using now has MAC <span class="mono">' + S.client_mac + '</span> on this router &mdash; that is only the right value if it is the same adapter <i>and</i> it does not randomise per network.';
+
+  const w = S.wwan || {}, st = S.sta || {};
+  const up = S.uplink;
+  let pill;
+  if (!up.enabled) pill = '<span class="pill">off</span>';
+  else if (w.up && (w['ipv4-address'] || []).length) pill = '<span class="pill ok">connected</span>';
+  else if (st.ssid) pill = '<span class="pill warn">associated, waiting for IP</span>';
+  else pill = '<span class="pill warn">connecting&hellip;</span>';
+  $('s-up').innerHTML = pill;
+  $('s-ssid').textContent = up.enabled ? (up.ssid + ' (' + bandName((S.radios.find(r => r.name === up.radio) || {}).band) + ')') : '–';
+  $('s-sig').textContent = (up.enabled && st.signal) ? st.signal + ' dBm' + (st.channel ? ', channel ' + st.channel : '') : '–';
+  $('s-mac').textContent = up.actual_mac || up.macaddr || '–';
+  const a4 = (w['ipv4-address'] || [])[0];
+  const gw = ((w.route || []).find(r => r.target === '0.0.0.0') || {}).nexthop;
+  $('s-ip').textContent = a4 ? a4.address + '/' + a4.mask + (gw ? '  via ' + gw : '') : '–';
+}
+
+function encOf(e) {
+  if (!e || !e.enabled) return 'none';
+  const auth = e.authentication || [], wpa = e.wpa || [];
+  if (auth.includes('802.1x')) return 'eap';
+  if (auth.includes('owe')) return 'owe';
+  if (auth.includes('sae') && auth.includes('psk')) return 'sae-mixed';
+  if (auth.includes('sae')) return 'sae';
+  if (wpa.includes(1) && wpa.includes(2)) return 'psk-mixed';
+  if (wpa.includes(1) && !wpa.includes(2)) return 'psk-mixed';
+  return 'psk2';
+}
+const encLabel = {none: 'Open', owe: 'OWE', 'sae-mixed': 'WPA2/3', sae: 'WPA3', 'psk-mixed': 'WPA/WPA2', psk2: 'WPA2', eap: 'Enterprise (unsupported)'};
+
+$('b-scan').onclick = async e => {
+  busy(e.target, true); $('scan-hint').textContent = 'Scanning… (up to 20 s)';
+  try {
+    const r = await get('scan&radio=' + encodeURIComponent($('c-radio').value));
+    if (!r.ok) throw new Error(r.error);
+    const list = (r.scan.results || []).filter(x => x.ssid).sort((a, b) => (b.signal || -999) - (a.signal || -999));
+    const tb = $('scan').querySelector('tbody'); tb.innerHTML = '';
+    list.forEach(x => {
+      const enc = encOf(x.encryption), tr = document.createElement('tr');
+      tr.className = 'pick';
+      [x.ssid, (x.signal || '?') + ' dBm', x.channel || '', encLabel[enc]].forEach(t => { const td = document.createElement('td'); td.textContent = t; tr.appendChild(td); });
+      tr.onclick = () => {
+        $('c-ssid').value = x.ssid; selBssid = x.bssid || ''; $('c-bssid').textContent = selBssid || '–';
+        if (enc !== 'eap') $('c-enc').value = enc;
+        if (enc === 'none') $('c-key').value = '';
+        $('scan-hint').textContent = enc === 'eap' ? 'Enterprise (802.1X) networks are not supported by this firmware.' : 'Selected ' + x.ssid + '.';
+      };
+      tb.appendChild(tr);
+    });
+    $('scan').hidden = !list.length;
+    $('scan-hint').textContent = list.length ? 'Tap a network to select it.' : 'No networks found.';
+  } catch (err) { $('scan-hint').textContent = 'Scan failed: ' + err.message; }
+  busy(e.target, false);
+};
+
+$('b-conn').onclick = async e => {
+  busy(e.target, true);
+  try {
+    const r = await post('connect', {
+      radio: $('c-radio').value, ssid: $('c-ssid').value, encryption: $('c-enc').value,
+      key: $('c-key').value, macaddr: $('c-mac').value.trim(), bssid: $('c-lock').checked ? selBssid : ''
+    });
+    show('m-conn', r.ok ? r.message : r.error, !r.ok);
+  } catch (err) { show('m-conn', 'Lost contact with the router while applying — that is normal if you were on the same band. Reconnect and refresh.', false); }
+  busy(e.target, false);
+  setTimeout(refresh, 8000);
+};
+
+$('b-disc').onclick = async e => {
+  busy(e.target, true);
+  try { const r = await post('disconnect'); show('m-status', r.ok ? r.message : r.error, !r.ok); } catch (err) { show('m-status', err.message, true); }
+  busy(e.target, false); setTimeout(refresh, 5000);
+};
+
+$('b-check').onclick = async e => {
+  busy(e.target, true); $('s-net').textContent = 'checking…';
+  try {
+    const r = await get('check');
+    const map = {online: '<span class="pill ok">online</span>', captive: '<span class="pill warn">captive portal / login page in the way</span>',
+      no_http: '<span class="pill warn">ping works, web blocked</span>', offline: '<span class="pill bad">no internet</span>'};
+    $('s-net').innerHTML = map[r.verdict] || r.verdict;
+  } catch (err) { $('s-net').textContent = 'check failed'; }
+  busy(e.target, false);
+};
+
+$('b-setup').onclick = async e => {
+  busy(e.target, true);
+  try { const r = await post('setup', {ssid: $('w-ssid').value, key: $('w-key').value}); show('m-setup', r.ok ? r.message : r.error, !r.ok); }
+  catch (err) { show('m-setup', 'Applied — reconnect to the setup Wi-Fi.', false); }
+  busy(e.target, false);
+};
+$('b-country').onclick = async e => {
+  busy(e.target, true);
+  try { const r = await post('country', {country: $('w-country').value}); show('m-setup', r.ok ? r.message : r.error, !r.ok); }
+  catch (err) { show('m-setup', 'Applied — reconnect if Wi-Fi dropped.', false); }
+  busy(e.target, false);
+};
+
+document.querySelectorAll('[data-part]').forEach(b => b.onclick = () => { location.href = API + 'backup&part=' + b.dataset.part; });
+
+async function flash(btnId, fileId, action, confirmText) {
+  const f = $(fileId).files[0];
+  if (!f) { show('m-fw', 'Choose a file first.', true); return; }
+  if (!confirm(confirmText)) return;
+  const btn = $(btnId); busy(btn, true);
+  show('m-fw', 'Uploading ' + f.name + ' (' + Math.round(f.size / 1024) + ' KiB)…');
+  try {
+    const r = await post(action, f, true);
+    show('m-fw', r.ok ? r.message : r.error, !r.ok);
+    if (r.ok) { document.querySelectorAll('button').forEach(b => b.disabled = true); }
+    else busy(btn, false);
+  } catch (err) { show('m-fw', 'Upload failed: ' + err.message, true); busy(btn, false); }
+}
+$('b-stock').onclick = () => flash('b-stock', 'f-stock', 'restore_stock',
+  'Replace this firmware with TP-Link stock? The router will reboot into TP-Link firmware (http://tplinkwifi.net).');
+$('b-up').onclick = () => flash('b-up', 'f-up', 'upgrade' + ($('f-keep').checked ? '&keep=1' : ''),
+  'Flash this image now? Do not unplug the router for 3 minutes.');
+$('b-reboot').onclick = async e => {
+  if (!confirm('Reboot the router?')) return;
+  try { const r = await post('reboot'); show('m-fw', r.message || r.error, !r.ok); } catch (err) {}
+};
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

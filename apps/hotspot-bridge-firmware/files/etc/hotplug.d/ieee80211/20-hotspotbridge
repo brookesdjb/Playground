@@ -1,0 +1,3 @@
+#!/bin/sh
+# A radio appeared late: build the Hotspot Bridge wireless layout now.
+[ "${ACTION}" = "add" ] && /usr/libexec/hotspotbridge/ensure-wifi

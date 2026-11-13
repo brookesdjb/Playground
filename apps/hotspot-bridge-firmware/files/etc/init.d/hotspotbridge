@@ -1,0 +1,12 @@
+#!/bin/sh /etc/rc.common
+# Make sure the Hotspot Bridge wireless layout exists after every boot.
+
+START=99
+
+boot() {
+	/usr/libexec/hotspotbridge/ensure-wifi
+}
+
+start() {
+	/usr/libexec/hotspotbridge/ensure-wifi
+}
