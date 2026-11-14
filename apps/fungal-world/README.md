@@ -1,6 +1,6 @@
 # Spore Hollow
 
-An alien fungal basin at dusk that you can fly through in the browser. Giant mushrooms with glowing gills, god rays through spore haze, glowing moss and mycelium, floating rocks, flying creatures, a fossil ribcage and a ringed gas giant in the sky.
+An alien fungal basin at dusk that you can explore on foot in the browser. Giant mushrooms with glowing gills and springy caps, god rays through spore haze, glowing moss and mycelium, moths and gliders, a fossil ribcage and a ringed gas giant in the sky.
 
 Everything is procedural: no images, models or sound files. The whole world is one ~116 KB HTML file.
 
@@ -21,9 +21,10 @@ Open `index.html` in **Chrome** or **Edge** on a desktop computer (it needs **We
 | | |
 |---|---|
 | Look around | Mouse |
-| Fly | `W` `A` `S` `D` |
-| Down / up | `Q` / `E` |
-| Faster | Hold `Shift` |
+| Walk | `W` `A` `S` `D` |
+| Run | Hold `Shift` |
+| Jump | `Space`. Land hard on a cap, or hold `Space` as you land, and it throws you up |
+| Fly instead | `G` toggles flight (`Q` / `E` down / up) |
 | Viewpoints | `1` to `6` |
 | Menu, mute, stats | `Esc`, `M`, `H` |
 
@@ -61,8 +62,10 @@ The approach is the same as Abyssal Garden's: a 3D density field is sculpted on 
    - **Ribcage:** a half-buried fossil ribcage and skull built from smooth-blended capsules (an SDF meshed with Surface Nets).
    - **Fallen giant:** a toppled giant resting on its cap in the eastern canyon.
    - **The Elder:** a 47 m parasol whose cap rises above everything else.
-8. **Life.** Schools of glowing skyfish, ray-like gliders with bioluminescent spots, rising spore motes from vents and spores falling from every gill.
-9. **Sound.** Synthesized live: wind that grows with altitude, an A-minor drone, glassy chimes, spore pops and distant calls.
+   - No floating rocks and no rising bubbles: the first version kept those from the underwater original, and they made it feel like water.
+8. **Life and wind.** Moth swarms hover near the ground with beating wings and glowing eye spots. Gliders soar high and mostly glide. Spores fall from every gill. A steady wind with sweeping gusts bends the plants and carries the dust and spores in one direction.
+9. **On foot.** You walk with gravity on the terrain's distance field. Mushroom stems are solid, and caps are springy platforms: land softly to walk across them, land hard or hold `Space` to be thrown higher. `G` switches to free flight.
+10. **Sound.** Synthesized live: wind that grows with altitude, an A-minor drone, glassy chimes, spore pops and distant calls.
 
 | File | What's inside |
 |---|---|
@@ -74,6 +77,7 @@ The approach is the same as Abyssal Garden's: a 3D density field is sculpted on 
 | `src/quality.js` | Low / Medium / High detail levels |
 | `src/dev.js` | Dev tools, only in `dev.html` (`npm run build:dev`): fly-through (`F`), benchmark (`B`), screenshot hooks |
 | `tools/shoot.cjs` | Headless screenshots of `dev.html` through Chromium's software WebGPU |
+| `tools/walktest.cjs` | Headless check of the walking physics: landing, walking, jumping, stems, caps |
 
 ## Screenshots without a GPU
 
@@ -88,13 +92,13 @@ This renders with SwiftShader (on the CPU) into an offscreen texture: `dev.html#
 ## Status and known gaps
 
 - **Not yet measured on a real GPU.** The screenshots come from the software renderer. The original runs at about 180 fps on an RTX 5070 Ti. This version draws more:
-  - about 2–3 million triangles of one-off mushrooms
+  - about 0.7 million (Low) to 1.5 million (High) triangles of one-off mushrooms
   - a 14-mesh instanced fungus pass
   - more expensive fog and sky
 
   The dynamic resolution and draw-distance tuning are still there. Run the `B` benchmark in `dev.html` on real hardware before relying on frame rates.
 - **Not tested on touch or mobile.** Low and Medium reduce mushroom detail and density, but haven't been tried on phones.
-- **Collision is terrain-only.** Mushroom stems, caps and the ribcage are not solid. You fly through them.
+- **The ribcage and small fungi are not solid.** Stems and cap tops are, as approximations: stems are cylinders, and caps are flat discs at their top height.
 
 ![Under the giants](screenshots/giants.jpg)
 ![The violet grotto](screenshots/grotto.jpg)

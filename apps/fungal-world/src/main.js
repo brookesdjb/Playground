@@ -239,7 +239,7 @@ const FLYN = FLY.length / 6, FLYT = 60, LUTN = 1024, flyLUT = new Float32Array(L
 const flyPts = [];
 // per-frame float state lives in one preallocated array, so the frame loop allocates no heap numbers
 const F = new Float64Array(32), P6 = new Float64Array(6);
-const CX = 0, CY = 1, CZ = 2, YAW = 3, PIT = 4, FX = 5, FY = 6, FZ = 7, RX = 8, RZ = 9, UX = 10, UY = 11, UZ = 12, VX = 13, VY = 14, VZ = 15, TIME = 16, FLT = 17, LAST = 18, GPU = 19, HUDT = 20, SPL = 21, MX = 22, MY = 23, MZ = 24;
+const CX = 0, CY = 1, CZ = 2, YAW = 3, PIT = 4, FX = 5, FY = 6, FZ = 7, RX = 8, RZ = 9, UX = 10, UY = 11, UZ = 12, VX = 13, VY = 14, VZ = 15, TIME = 16, FLT = 17, LAST = 18, GPU = 19, HUDT = 20, SPL = 21, MX = 22, MY = 23, MZ = 24, GND = 25, BOB = 26, FLM = 27, JMP = 28;
 // aim the camera from P6 = position + look-at point
 function aim() {
   const dx = P6[3] - P6[0], dy = P6[4] - P6[1], dz = P6[5] - P6[2];
@@ -284,7 +284,7 @@ const meshes = [meshChunk(1, 3), meshChunk(7, 3), meshChunk(13, 3), meshChunk(22
   meshLathe([[0, 0, 0.5], [0.2, 0, 0.6], [0.26, 0.5, 0.85], [0.4, 1.25, 1], [0.4, 1.42, 1], [0.33, 1.48, 0.9], [0.26, 1.38, 0.4], [0.18, 0.8, 0.12], [0, 0.5, 0.05]], 16, 0.35, 8),
   meshLathe([[0, 0, 0.5], [0.5, 0, 0.7], [0.72, 0.18, 1], [0.74, 0.38, 1], [0.62, 0.5, 0.9], [0.48, 0.42, 0.45], [0.4, 0.2, 0.15], [0, 0.14, 0.06]], 18, 0.25, 10),
   meshCoral(0), meshCoral(1), meshTubes()].map((m) => m.build());
-meshes.push(meshRibs(Wd.ribs), meshChunk(1, 1).build(), meshManta().build(), meshFish().build(),
+meshes.push(meshRibs(Wd.ribs), meshChunk(1, 1).build(), meshManta().build(), meshMoth().build(),
   meshChunk(3).build(), meshChunk(11).build(), meshChunk(29).build(), meshChunk(5, 3).build(), meshChunk(17, 3).build(), meshChunk(41, 3).build(), meshChunk(9, 1).build(), meshCoral(0, 1).build(), meshCoral(1, 1).build(), meshChunk(5, 2, 1).build(), meshChunk(17, 2, 1).build(), meshChunk(41, 2, 1).build());
 let nV = 0, nI = 0;
 for (const m of meshes) { m.v0 = nV; m.i0 = nI; nV += m.nv; nI += m.ib.length; }
@@ -441,7 +441,7 @@ function drawCells(r, start, lo, hi, mar, indexed, verts, minD, maxD) {
 }
 function render() {
   // camera basis (right vector is horizontal)
-  const cx = F[CX], cy = F[CY], cz = F[CZ], pitch = F[PIT], yaw = F[YAW];
+  const cx = F[CX], cy = F[CY] + (F[FLM] ? 0 : sin(F[BOB] * 2) * 0.035), cz = F[CZ], pitch = F[PIT], yaw = F[YAW];
   const cp = cos(pitch), fy = sin(pitch), rx = cos(yaw), rz = sin(yaw), fx = cp * rz, fz = -cp * rx;
   const ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;
   F[FX] = fx; F[FY] = fy; F[FZ] = fz; F[RX] = rx; F[RZ] = rz; F[UX] = ux; F[UY] = uy; F[UZ] = uz;
@@ -530,6 +530,42 @@ function sd(j) {
   const p = a + (cv(ix + 1, iy, iz) - a) * u, q = b + (cv(ix + 1, iy + 1, iz) - b) * u, r = c + (cv(ix + 1, iy, iz + 1) - c) * u, s = d + (cv(ix + 1, iy + 1, iz + 1) - d) * u;
   const e = p + (q - p) * v; CS[j] = (e + (r + (s - r) * v - e) * (z - iz)) / 127;
 }
+// On foot: the body is a sphere of radius CR whose centre is EYE below the camera. Gravity, a jump, run with Shift.
+// Mushroom stems are solid; caps are springy and throw you back up, so the canopy can be climbed.
+const EYE = 1.15, STEMS = Wd.stems, CAPT = Wd.caps;
+function walk(dt, mf, mr, sy, cw) {
+  const sp = ks || tN > 1 ? 9 : 4.2, l = sqrt(mf * mf + mr * mr) || 1, gnd = F[GND];
+  const k = 1 - exp(-dt * (gnd ? 12 : 2.5));
+  F[VX] += ((sy * mf + cw * mr) / l * sp - F[VX]) * k; F[VZ] += ((-cw * mf + sy * mr) / l * sp - F[VZ]) * k;
+  F[VY] -= 20 * dt; if (F[VY] < -40) F[VY] = -40;
+  if (F[JMP] && gnd) { F[VY] = 7.5; F[JMP] = 0; }
+  const feet0 = F[CY] - EYE - CR;
+  let x = F[CX] + F[VX] * dt, z = F[CZ] + F[VZ] * dt;
+  const rad = sqrt(x * x + z * z); if (rad > 150) { x *= 150 / rad; z *= 150 / rad; }
+  F[CY] -= EYE; F[MX] = x - F[CX]; F[MY] = F[VY] * dt; F[MZ] = z - F[CZ];
+  F[GND] = 0; collide();
+  // stems: push the body out sideways (stems lean, so follow the centre line up to the body's height)
+  for (let i = 0; i < STEMS.length; i += 7) {
+    const t = (F[CY] - STEMS[i + 1]) / STEMS[i + 4]; if (t < -0.05 || t > 1) continue;
+    const t2 = t * t * STEMS[i + 4], dx = F[CX] - STEMS[i] - STEMS[i + 5] * t2, dz = F[CZ] - STEMS[i + 2] - STEMS[i + 6] * t2;
+    const rr = STEMS[i + 3] * (1 - 0.2 * t) + CR, d2 = dx * dx + dz * dz; if (d2 >= rr * rr) continue;
+    const d = sqrt(d2) || 1e-3, nx = dx / d, nz = dz / d, vn = F[VX] * nx + F[VZ] * nz;
+    F[CX] += nx * (rr - d); F[CZ] += nz * (rr - d); if (vn < 0) { F[VX] -= nx * vn; F[VZ] -= nz * vn; }
+  }
+  F[CY] += EYE;
+  // caps are springy: land softly and you can walk across them; land hard, or hold Space, and they throw you up
+  const feet = F[CY] - EYE - CR;
+  if (F[VY] <= 0) for (let i = 0; i < CAPT.length; i += 4) {
+    const top = CAPT[i + 1]; if (feet0 < top - 0.05 || feet > top + 0.02) continue;
+    const dx = F[CX] - CAPT[i], dz = F[CZ] - CAPT[i + 2]; if (dx * dx + dz * dz > CAPT[i + 3] * CAPT[i + 3] * 0.6) continue;
+    F[CY] += top - feet;
+    if (-F[VY] > 6 || F[JMP]) { F[VY] = min(max(-F[VY] * 0.85, F[JMP] ? 13 : 0), 17); F[JMP] = 0; } else { F[VY] = 0; F[GND] = 1; }
+    break;
+  }
+  if (F[CY] > 14) F[CY] = 14;
+  // a little head bob while walking on the ground
+  const hv = sqrt(F[VX] * F[VX] + F[VZ] * F[VZ]); F[BOB] += hv * dt * 1.9 * (F[GND] ? 1 : 0);
+}
 // Moves the camera by F[MX..MZ] in steps shorter than its radius CR (so it can't pass through thin rock), pushing it
 // back out after each step and dropping velocity into the rock, so it slides along.
 const CR = 0.5;
@@ -543,6 +579,7 @@ function collide() {
       let gx = CS[1] - CS[2], gy = CS[3] - CS[4], gz = CS[5] - CS[6]; const l = sqrt(gx * gx + gy * gy + gz * gz);
       if (l < 0.075) break; // flat: deep in rock
       gx /= l; gy /= l; gz /= l; const vn = F[VX] * gx + F[VY] * gy + F[VZ] * gz;
+      if (!F[FLM] && gy < -0.65) { F[CY] -= s / gy; F[GND] = 1; if (F[VY] < 0) F[VY] = 0; continue; } // standing on ground
       F[CX] -= gx * s; F[CY] -= gy * s; F[CZ] -= gz * s;
       if (vn > 0) { F[VX] -= gx * vn; F[VY] -= gy * vn; F[VZ] -= gz * vn; }
     }
@@ -573,6 +610,12 @@ function frame(now) {
     dynN = dynT = dynG = dynGN = 0; resize();
   }
   F[TIME] += dt;
+  move(dt);
+  render();
+  if (hud) hudLine(dtr);
+}
+// camera: look smoothing, then flight or walking
+function move(dt) {
   {
     // touch: holding the finger away from where it went down keeps turning, like a joystick
     if (tId >= 0) {
@@ -585,16 +628,21 @@ function frame(now) {
     const ax = lkx * kq, ay = lky * kq; lkx -= ax; lky -= ay; l2x += ax; l2y += ay;
     const dyw = l2x * kq, dpt = l2y * kq; l2x -= dyw; l2y -= dpt;
     const yaw = F[YAW] + dyw; let pitch = F[PIT] - dpt; pitch = pitch < -1.55 ? -1.55 : pitch > 1.55 ? 1.55 : pitch;
-    const sp = ks || tN > 1 ? 26 : 7, k = 1 - exp(-dt * 4.5), mf = tId >= 0 ? 0.7 : kf - kb, mr = kr - kl, mu = ku - kd, cp = cos(pitch), sy = sin(yaw), cw = cos(yaw);
-    const vx = F[VX] + ((sy * cp * mf + cw * mr) * sp - F[VX]) * k, vy = F[VY] + ((sin(pitch) * mf + mu) * sp - F[VY]) * k, vz = F[VZ] + ((-cw * cp * mf + sy * mr) * sp - F[VZ]) * k;
-    let x = F[CX] + vx * dt, y = F[CY] + vy * dt, z = F[CZ] + vz * dt;
-    const rad = sqrt(x * x + z * z); if (rad > 150) { x *= 150 / rad; z *= 150 / rad; }
-    y = y < -52 ? -52 : y > 6 ? 6 : y;
-    F[YAW] = yaw; F[PIT] = pitch; F[VX] = vx; F[VY] = vy; F[VZ] = vz; F[MX] = x - F[CX]; F[MY] = y - F[CY]; F[MZ] = z - F[CZ];
-    collide();
+    const mf = tId >= 0 ? 0.7 : kf - kb, mr = kr - kl, mu = ku - kd, cp = cos(pitch), sy = sin(yaw), cw = cos(yaw);
+    F[YAW] = yaw; F[PIT] = pitch;
+    if (F[FLM]) { // free flight (G)
+      const sp = ks || tN > 1 ? 26 : 7, k = 1 - exp(-dt * 4.5);
+      const vx = F[VX] + ((sy * cp * mf + cw * mr) * sp - F[VX]) * k, vy = F[VY] + ((sin(pitch) * mf + mu) * sp - F[VY]) * k, vz = F[VZ] + ((-cw * cp * mf + sy * mr) * sp - F[VZ]) * k;
+      let x = F[CX] + vx * dt, y = F[CY] + vy * dt, z = F[CZ] + vz * dt;
+      const rad = sqrt(x * x + z * z); if (rad > 150) { x *= 150 / rad; z *= 150 / rad; }
+      y = y < -52 ? -52 : y > 6 ? 6 : y;
+      F[VX] = vx; F[VY] = vy; F[VZ] = vz; F[MX] = x - F[CX]; F[MY] = y - F[CY]; F[MZ] = z - F[CZ];
+      collide();
+    } else walk(dt, mf, mr, sy, cw);
   }
-  render();
-  if (hud) {
+}
+function hudLine(dtr) {
+  {
     hN++; if (dtr > hMax) hMax = dtr; if (dtr < hMin) hMin = dtr; if (dtr > hPer * 1.5) { hLate++; hTot++; }
     F[HUDT] += dtr / 1000;
     if (F[HUDT] > 0.5) { info.textContent = `${(hN / F[HUDT]).toFixed(0)} fps  ·  worst frame ${hMax.toFixed(1)} ms  ·  late frames ${hLate} (total ${hTot})  ·  GPU ${F[GPU].toFixed(2)} ms  ·  ${W}x${H} (${W * 100 / DW | 0}%)`; F[HUDT] = 0; hPer = hMin; hN = 0; hMax = 0; hMin = 1e9; hLate = 0; }
@@ -606,6 +654,8 @@ const key = (e, v) => {
   switch (e.code) {
     case 'KeyW': kf = v; break; case 'KeyS': kb = v; break; case 'KeyA': kl = v; break; case 'KeyD': kr = v; break;
     case 'KeyE': ku = v; break; case 'KeyQ': kd = v; break; case 'ShiftLeft': case 'ShiftRight': ks = v; break;
+    case 'Space': if (v && !e.repeat) F[JMP] = 1; else if (!v) F[JMP] = 0; break;
+    case 'KeyG': if (v && !e.repeat) { F[FLM] = 1 - F[FLM]; F[VY] = 0; } break;
     default: if (v && !e.repeat) {
       if (e.code === 'KeyH') { hud = !hud; hTot = 0; hPer = 1e9; info.textContent = ''; }
       else if (e.code === 'KeyM') mute();

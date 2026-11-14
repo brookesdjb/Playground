@@ -35,10 +35,11 @@ const CLEARS = [
   [-60, -36, -60, 36, 13, 8], [-60, 42, -18, 46, 12, 8], [4, 58, 8, 100, 24, 10], [-34, -74, -56, -46, 11, 8],
 ];
 const PURPLE = [6, 84];
-// flying schools (x, y, z, orbit radius, count, size, direction, seed) and gliders (x, y, z, R, phase, speed, size, seed)
+// moth swarms (x, -, z, radius, count x 7, size, -, seed): they hover a few metres above the ground and gliders (x, y, z, R, phase, speed, size, seed)
 const SCH = [[-2, -36, -10, 15, 520, 0.3, 1, 0.945], [8, -30, -70, 22, 420, 0.32, -1], [48, -30, 14, 18, 360, 0.3, 1], [-58, -30, -8, 11, 420, 0.28, -1, 0.3], [8, -36, 84, 16, 320, 0.28, 1],
   [-90, -28, -70, 25, 300, 0.3, 1], [95, -30, 70, 25, 300, 0.3, -1], [0, -22, 20, 30, 380, 0.34, -1], [-30, -30, -100, 18, 300, 0.3, 1], [16, -36, 30, 12, 300, 0.3, 1], [-48, -34, -58, 12, 300, 0.3, -1], [-45, -35, 38, 14, 320, 0.3, 1]];
-const GLIDERS = [[1, -24, 3.5, 14, 3.012, 0.085, 3.6, 0.1], [49, -27, 24.5, 5, 0.029, -0.08, 3.7, 0.4], [0, -6, -60, 34, 0.3, 0.06, 5.2, 0.7], [-50, -12, 20, 26, 5, -0.075, 3.8, 0.55], [10, -10, 86, 26, 2.2, 0.07, 4.4, 0.85], [20, -6, -20, 46, 4.2, -0.045, 5.6, 0.25]];
+// gliders soar high over the canopy and rarely beat their wings
+const GLIDERS = [[0, -2, -60, 40, 0.3, 0.05, 5.6, 0.7], [-50, -4, 20, 34, 5, -0.055, 4.4, 0.55], [20, 0, -10, 52, 4.2, -0.04, 6, 0.25]];
 // fungus palettes (see pal() in W_FUNGI): 0 crimson, 1 teal, 2 violet, 3 amber, 4 ghost, 5 indigo.
 // PALW: how much of each palette's light goes to the magenta glow channel (the rest is teal); PALG: spore glint colour
 const PALW = [1, 0, 0.95, 0.75, 0.15, 0.05], PALG = [0.9, 0.7, 0.9, 0.15, 0.45, 0.7];
@@ -243,7 +244,7 @@ function makeWorld(D, T, flyPts, POSES) {
     const res = shroom(SM, { x, y: y - 0.25, z, h: H, r, R, kind, hue, gl, tg: o.tg ?? rr(0, 0.35), sg: 0.3, bend: [lx, 0, lz], curve: rr(-0.04, 0.04), bulb: rr(0.25, 0.75),
       ring: kind === 0 && rnd() < 0.6 ? rr(0.62, 0.8) : 0, tilt: rr(0.15, 0.4), q: GQ, seed: rnd() * 50 });
     addTris(i0, cx, cz, y - 1, cy + ch, o.always);
-    const g = { x, y, z, cx, cy, cz, R, r, H, ch, pal, hue, gl };
+    const g = { x, y, z, cx, cy, cz, R, r, H, ch, pal, hue, gl, lx, lz, top: res.top[1] };
     giants.push(g);
     dress(g, res, H > 10 ? (o.threads ?? (zoneP(x, z) > 0.4 ? 0.6 : 0.3)) : 0);
     // brackets climbing the stem
@@ -293,10 +294,11 @@ function makeWorld(D, T, flyPts, POSES) {
     const y = f[f.length - 2], h = rr(1.5, 6) * (0.6 + fd * 0.6), R = h * rr(0.22, 0.45), r = R * 0.11 + 0.06;
     if (f[f.length - 1] < h + 2 || grad(x, y, z)[1] < 0.65 || !stemOK(x, y, z, r, y + h) || nearFly(x, y + h, z, R + 2) || !capOK(x, y + h, z, R, R * 0.4)) continue;
     const pal = palAt(x, z), i0 = SM.ni, kind = rnd() * 4 | 0;
-    const res = shroom(SM, { x, y: y - 0.1, z, h, r, R, kind, hue: hueOf(pal), gl: rr(0.5, 1), tg: rr(0, 0.4), sg: 0.3, bend: [rr(-0.15, 0.15), 0, rr(-0.15, 0.15)], curve: rr(-0.05, 0.05), bulb: rr(0.2, 0.6), q: GQ * 0.6, seed: rnd() * 50 });
+    const bx = rr(-0.15, 0.15), bz = rr(-0.15, 0.15);
+    const res = shroom(SM, { x, y: y - 0.1, z, h, r, R, kind, hue: hueOf(pal), gl: rr(0.5, 1), tg: rr(0, 0.4), sg: 0.3, bend: [bx, 0, bz], curve: rr(-0.05, 0.05), bulb: rr(0.2, 0.6), q: GQ * 0.6, seed: rnd() * 50 });
     addTris(i0, x, z, y - 1, y + h + R);
     splat(x, res.under[1] - 0.8, z, R * R * 0.05, PALW[pal]);
-    if (h > 3.5) giants.push({ x, y, z, cx: x, cy: y + h, cz: z, R, r, H: h, ch: R * 0.4, pal });
+    giants.push({ x, y, z, cx: x + bx * h, cy: y + h, cz: z + bz * h, R, r, H: h, ch: R * 0.4, pal, lx: bx, lz: bz, top: res.top[1] });
   }
   // glowing fungus in the ground: a web around each giant's foot plus patches (ground map g channel)
   const veinG = new Float32Array(512 * 512);
@@ -440,7 +442,7 @@ function makeWorld(D, T, flyPts, POSES) {
   const BOULD = [[-11, -11, -105, 14, 5], [-56, -19, -18, 18, 6], [-62, -14, -82, 22, 7], [24, -15, -24, 22, 7], [-18, -12, 4, 14, 6], [30, -14, 30, 16, 6], [62, -10, -58, 22, 8], [-30, -13, -84, 16, 7], [-58, -14, 0, 14, 6], [19, -13, 98, 18, 6], [62, -9, 34, 14, 6]];
   rseed(8);
   for (let i = 0; i < 9; i++) { const a = rnd() * TAU, r = rr(60, 150); BOULD.push([cos(a) * r, rr(-20, -9), sin(a) * r, 10 + rnd() * 12 | 0, rr(5, 9)]); }
-  for (const b of BOULD) for (let i = 0; i < b[3] / 2; i++) { // floating rocks, held up by who knows what
+  if (0) for (const b of BOULD) for (let i = 0; i < b[3] / 2; i++) { // floating rocks: off, they made the world feel underwater
     const sc = rnd() < 0.12 ? rr(1.8, 3.2) : rr(0.35, 1.5);
     const x = b[0] + rr(-1, 1) * b[4], y = b[1] + rr(-1, 1) * b[4] * 0.6, z = b[2] + rr(-1, 1) * b[4];
     if (Dw(x, y, z) > -sc) continue;
@@ -520,7 +522,7 @@ function makeWorld(D, T, flyPts, POSES) {
   const VENTS = [[4, -3], [4.5, -3.5], [2, -1], [5.5, -7], [3, -9], [6, -90], [8, -84], [4, -93], [-9, 3], [40, 20], [-56, 12], [10, 80], [-2, 30], [0, -30], [12, 2], [46, 30], [-20, -103], [-52, -12], [4, 70], [9, -74], [14, 26], [26, 40], [-45, -64], [-55, -40], [-58, 22], [-40, 40], [-14, 45], [-1, -9], [-7, -6]];
   rseed(13);
   for (const s of spots) if (rnd() < 0.28) VENTS.push([s[0], s[2], s[1]]);
-  for (const v of VENTS) {
+  if (0) for (const v of VENTS) { // rising motes: off, they read as bubbles
     const y0 = v.length > 2 ? v[2] : gy(v[0], v[1]), pal = zoneP(v[0], v[1]) > 0.4 ? 2 : rnd() < 0.7 ? 1 : 4, n = 70 + rnd() * 60 | 0;
     splat(v[0], y0 + 2, v[1], 1.5, PALW[pal]);
     for (let i = 0; i < n; i++) motes.push(v[0] + rr(-0.4, 0.4), y0, v[1] + rr(-0.4, 0.4), rnd() < 0.2 ? rr(0.06, 0.12) : rr(0.025, 0.06), pal + rnd() * 0.99, rr(0.5, 1.4), rr(8, 26), rr(0.1, 0.3));
@@ -581,7 +583,7 @@ function makeWorld(D, T, flyPts, POSES) {
   // --- flying schools + gliders
   const fish = [];
   rseed(14);
-  for (const s of SCH) { const ss = s[7] === undefined ? rnd() : s[7]; for (let i = 0; i < s[4]; i++) fish.push(s[0], s[1], s[2], s[3], rnd(), s[6] * 1.9 / s[3], s[5], ss); }
+  for (const s of SCH) { const ss = s[7] === undefined ? rnd() : s[7], y = gy(s[0], s[2]) + 2.5, R = s[3] * 0.45; for (let i = s[4] / 7 | 0; i > 0; i--) fish.push(s[0], y, s[2], R, rnd(), rr(0.6, 1.4), s[5] * 1.6, ss); }
   const mantas = [];
   for (const m of GLIDERS) mantas.push(...m);
 
@@ -600,7 +602,9 @@ function makeWorld(D, T, flyPts, POSES) {
     for (let c = 0; c < nCells; c++) { const a = L[c]; for (let i = 0; i < a.length; i += 12) { for (let j = 0; j < 12; j++) data[k++] = a[i + j]; lo[c] = min(lo[c], a[i + 1] - 3); hi[c] = max(hi[c], a[i + 1] + 3); } }
     return { data, n, start, lo, hi };
   };
-  return { gy, glints: new Float32Array(glints), chunks: chunks.map(packC), props: props.map(packC), big: pack(big), bigF: pack(big, 2, 1.5), small: pack(small), solids: { data: new Float32Array(sol.data), ranges: sol.ranges }, bubbles: new Float32Array(motes), volD, gm, shrooms: packShrooms(), sprops: sprops.map(packC), ribs, fish: new Float32Array(fish), mantas: new Float32Array(mantas), snow };
+  return { gy, glints: new Float32Array(glints), chunks: chunks.map(packC), props: props.map(packC), big: pack(big), bigF: pack(big, 2, 1.5), small: pack(small), solids: { data: new Float32Array(sol.data), ranges: sol.ranges }, bubbles: new Float32Array(motes), volD, gm, shrooms: packShrooms(), sprops: sprops.map(packC), ribs,
+    // for walking: stems (x, y, z, r, height, lean x, lean z) and caps (centre x, top, centre z, radius)
+    stems: new Float32Array(giants.flatMap((g) => [g.x, g.y, g.z, g.r, g.H, g.lx || 0, g.lz || 0])), caps: new Float32Array(giants.flatMap((g) => g.top ? [g.cx, g.top, g.cz, g.R] : [])), fish: new Float32Array(fish), mantas: new Float32Array(mantas), snow };
 }
 const fract = (x) => x - floor(x);
 
@@ -689,7 +693,7 @@ function meshRibs(rb) {
 }
 // the shared small fungus meshes (see NSV), about 1 m across; their hue and glow come from each instance
 function smallShrooms() {
-  const q = LV > 1 ? 0.45 : LV ? 0.65 : 0.85, V = [];
+  const q = LV > 1 ? 0.35 : LV ? 0.45 : 0.6, V = [];
   const one = (f) => { rseed(300 + V.length); const M = new SMesh(); f(M); V.push(M.build()); };
   const S = (M, o) => shroom(M, Object.assign({ x: 0, y: 0, z: 0, hue: 0, gl: 0.9, tg: 0.25, sg: 0.25, bulb: 0.4, q, seed: rnd() * 40 }, o));
   one((M) => S(M, { h: 1.3, r: 0.14, R: 0.7, kind: 1 }));
@@ -731,12 +735,14 @@ function meshManta() {
   }
   return m;
 }
-function meshFish() {
+// moth: a slim body along +x and two pairs of wings in the xz plane; aux = how far out along the wing (0 on the body)
+function meshMoth() {
   const m = new Mesh();
-  const X = [0.5, 0.3, 0.05, -0.22, -0.34], H = [0.01, 0.13, 0.17, 0.09, 0.035], Wd = [0.01, 0.05, 0.065, 0.03, 0.012], rings = [];
-  for (let i = 0; i < 5; i++) { const r = []; for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; r.push(m.v(X[i], sin(a) * H[i], cos(a) * Wd[i])); } rings.push(r); }
-  for (let i = 0; i < 4; i++) for (let k = 0; k < 6; k++) { const k2 = (k + 1) % 6; m.quad(rings[i][k], rings[i + 1][k], rings[i + 1][k2], rings[i][k2]); }
-  const a = m.v(-0.33, 0, 0), b = m.v(-0.56, 0.2, 0), c = m.v(-0.47, 0, 0), d = m.v(-0.56, -0.2, 0);
-  m.tri(a, b, c); m.tri(a, c, d);
+  m.tube([[0.14, 0, 0], [0.05, 0.01, 0], [-0.08, 0, 0], [-0.2, -0.01, 0]], (k) => [0.018, 0.03, 0.026, 0.012][k], 5, true, () => 0);
+  for (const sz of [-1, 1]) {
+    const a = m.v(0.06, 0.01, 0, 0), b = m.v(0.1, 0.01, sz * 0.22, sz), c = m.v(-0.04, 0.01, sz * 0.3, sz), d = m.v(-0.05, 0.01, sz * 0.04, sz * 0.15);
+    const e = m.v(-0.14, 0.01, sz * 0.2, sz * 0.7);
+    if (sz > 0) { m.quad(a, b, c, d); m.tri(d, c, e); } else { m.quad(a, d, c, b); m.tri(d, e, c); }
+  }
   return m;
 }

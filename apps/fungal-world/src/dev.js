@@ -48,6 +48,15 @@ window.__dev = {
   stats: () => ({ fungusTris: SH.start[CELLS * CELLS + 1] * 2, smallFungi: Wd.sprops.reduce((a, c) => a + c.n, 0), smallTris: FSM.reduce((a, m, i) => a + m.ib.length / 3 * Wd.sprops[i].n, 0),
     leaves: Wd.big.n + Wd.small.n, motes: nBub, glints: nGl, terrainTris: T.ib ? T.ib.length / 3 : T.start[CELLS * CELLS] * 2 }),
   res: (px) => { pix = px; resize(); },
+  walkData: () => ({ stems: Array.from(STEMS.subarray(0, 70)), caps: Array.from(CAPT.subarray(0, 40)), nStems: STEMS.length / 7, nCaps: CAPT.length / 4 }),
+  // run the movement for `sec` seconds at 60 Hz with keys held ({ f, b, l, r, s, jump, fly }), without drawing
+  sim: (sec, k = {}) => {
+    kf = k.f | 0; kb = k.b | 0; kl = k.l | 0; kr = k.r | 0; ks = k.s | 0; if (k.fly !== undefined) F[FLM] = k.fly;
+    let bounces = 0, vmax = -1e9;
+    for (let i = 0; i < sec * 60; i++) { if (k.jump) F[JMP] = 1; const vy = F[VY]; move(1 / 60); if (F[VY] > 8 && vy < 0) bounces++; vmax = Math.max(vmax, F[CY]); }
+    release();
+    return { x: +F[CX].toFixed(2), y: +F[CY].toFixed(2), z: +F[CZ].toFixed(2), vy: +F[VY].toFixed(2), gnd: F[GND], bounces, ymax: +vmax.toFixed(2) };
+  },
   // the last frame (offscreen mode) as a PNG data URL
   grab: async () => {
     render(); await Q.onSubmittedWorkDone();

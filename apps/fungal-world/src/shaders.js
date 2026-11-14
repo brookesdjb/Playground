@@ -203,6 +203,7 @@ const HAZS = vec3f(.70, .40, .36);
 const GLA = vec3f(.18, 1., .80);
 const GLB = vec3f(1., .26, .78);
 const FOG0 = .0022; const FOGD = .02; const FOGH = .055; const FY = -46.;
+const WIND = vec2f(.8, .6);
 const PD = vec3f(-.55, .36, .75); const PA = vec3f(.3, .92, -.25);
 const TAU = 6.2831853;
 const LOW = ${LV > 1};
@@ -531,9 +532,10 @@ struct LO { @builtin(position) cp: vec4f, @location(0) wp: vec3f, @location(1) n
   @location(3) @interpolate(flat) col: vec3f, @location(4) @interpolate(flat) pr: vec4f,
   @location(5) @interpolate(flat) sd: vec2f, @location(6) @interpolate(flat) spc: vec3f };
 fn sway(p: vec2f, h: f32, t: f32) -> vec2f {
-  let ph = dot(p, vec2f(.031, .017));
-  let a = .012 * pow(max(h, 0.), 1.25);
-  return a * (vec2f(sin(t * .5 + ph + h * .09), cos(t * .37 + ph * 1.3 + h * .07)) + .35 * vec2f(sin(t * 1.3 + ph * 3. + h * .3), cos(t * 1.1 + ph * 2. + h * .23)));
+  let a = .016 * pow(max(h, 0.), 1.25);
+  let gust = .5 + .5 * sin(t * .45 - dot(p, WIND) * .07) * (.6 + .4 * sin(t * .13 + p.x * .01));
+  let flut = .3 * sin(t * 2.6 + dot(p, vec2f(.7, .5)) + h * .5);
+  return a * (WIND * (gust + flut) + vec2f(-WIND.y, WIND.x) * .2 * sin(t * 1.9 + p.y * .8 + h));
 }
 fn shape2(v: f32) -> f32 { return sin(3.14159 * sat(v)); }
 fn pal(h: f32) -> vec3f {
@@ -649,33 +651,34 @@ struct GO { @builtin(position) cp: vec4f, @location(0) uv: vec2f, @location(1) @
 const W_ANIM = S_B + /*wgsl*/`
 struct VI { @location(0) p: vec3f, @location(1) n: vec4f, @location(2) a: vec4f, @location(3) b: vec4f };
 struct VO { @builtin(position) cp: vec4f, @location(0) wp: vec3f, @location(1) n: vec3f, @location(2) op: vec3f, @location(3) @interpolate(flat) sd: f32, @location(4) lt: f32 };
+// moths: each wanders its own looping path round the swarm centre, faces where it flies and beats its wings
 @vertex fn vsFish(i: VI) -> VO {
   var o: VO;
-  let s = i.b.x; let h = vec3f(hs(s), hs(s + .37), hs(s + .71));
-  let R = i.a.w; let t = g.cam.w;
-  let ta = t * i.b.y + i.b.w * 6.3 + (h.x - .5) * (26. / R);
-  let ph = i.b.w * 17.;
-  let P = i.a.xyz + vec3f(R * cos(ta), 2.2 * sin(3. * ta + ph), R * .6 * sin(ta));
-  let T = normalize(vec3f(-R * sin(ta), 6.6 * cos(3. * ta + ph), R * .6 * cos(ta))) * sign(i.b.y);
-  let S = normalize(cross(vec3f(0., 1., 0.), T)); let Up = cross(T, S);
-  let off = S * ((h.y - .5) * 5. + sin(t * .6 + s * 40.) * .5) + Up * ((h.z - .5) * 3.2 + cos(t * .5 + s * 31.) * .4);
-  var l = i.p * i.b.z * (.75 + .5 * h.z);
-  l.z += sin(t * 9. + s * 50. + l.x * 5.) * .22 * (.25 * i.b.z - l.x);
-  let w = P + off + T * l.x + Up * l.y + S * l.z;
+  let s = i.b.x; let h = vec3f(hs(s), hs(s + .37), hs(s + .71)); let f = vec3f(.31, .53, .43) * i.b.y * (.7 + .6 * h);
+  let R = i.a.w; let t = g.cam.w + s * 100.;
+  let P = i.a.xyz + vec3f(R * sin(t * f.x + h.y * 9.), 1.6 * sin(t * f.y + h.z * 7.) + 2. * h.x, R * sin(t * f.z * 1.3 + h.x * 5.));
+  let T = normalize(vec3f(R * f.x * cos(t * f.x + h.y * 9.), 1.6 * f.y * cos(t * f.y + h.z * 7.) * .5, R * f.z * 1.3 * cos(t * f.z * 1.3 + h.x * 5.)) + vec3f(0., 1e-4, 0.));
+  let S = normalize(cross(vec3f(0., 1., 0.), T + vec3f(1e-4, 0., 0.))); let Up = cross(T, S);
+  let a = sin(g.cam.w * (17. + 8. * h.z) + s * 40.) * 1.1;
+  var l = i.p * i.b.z * (.8 + .4 * h.z);
+  let w0 = abs(l.z); l = vec3f(l.x, l.y + w0 * sin(a), l.z * cos(a));
+  let w = P + T * l.x + Up * l.y + S * l.z;
   o.cp = g.vp * vec4f(w, 1.); o.wp = w; o.n = T * i.n.x + Up * i.n.y + S * i.n.z; o.op = i.p; o.sd = s;
   o.lt = shadow1(w);
   return o;
 }
-@fragment fn fsFish(i: VO) -> @location(0) vec4f {
-  let n = normalize(i.n); let L = g.sun.xyz; let V = normalize(g.cam.xyz - i.wp);
+@fragment fn fsFish(i: VO, @builtin(front_facing) ff: bool) -> @location(0) vec4f {
+  var n = normalize(i.n); if (!ff) { n = -n; }
+  let L = g.sun.xyz; let V = normalize(g.cam.xyz - i.wp);
   let z = zone(i.wp); let vv = vol(i.wp);
-  // dark violet skyfish with a glowing lateral line and belly lights
-  var alb = mix(vec3f(.30, .26, .40), vec3f(.06, .05, .10), ss(-.05, .2, i.op.y));
+  // dusky wings with a glowing eye spot, a glowing body; light shines through the wings
   let gc = select(GLA, GLB, fract(i.sd * 3.7) > .6);
-  let line = ss(.03, .0, abs(i.op.y - .01)) * step(i.op.x, .38);
+  let az = abs(i.op.z);
+  var alb = mix(vec3f(.26, .20, .30), vec3f(.45, .32, .22), fract(i.sd * 5.1)) * (.6 + .4 * az * 4.);
+  let spot = ss(.055, .03, length(vec2f(i.op.x + .01, az - .17))) + ss(.035, .02, length(vec2f(i.op.x + .1, az - .14)));
   let E = sunE(i.wp.y, z) * i.lt;
-  var c = alb * (E * (.25 + .75 * sat(dot(n, L))) + amb(i.wp, n, vv.g, z) * 1.3 + glow(i.wp));
-  c += E * pow(sat(dot(n, normalize(V + L))), 24.) * 1.2 + gc * (line * 1.6 + ss(-.02, -.1, i.op.y) * .25);
+  var c = alb * (E * sat(dot(n, L)) + amb(i.wp, n, vv.g, z) * 1.3 + glow(i.wp)) + alb * E * pow(sat(dot(-V, L)), 2.) * .8;
+  c += gc * (spot * 1.8 + ss(.03, .0, az) * .9);
   return fin(fog(c, i.wp, z));
 }
 @vertex fn vsManta(i: VI) -> VO {
@@ -688,13 +691,14 @@ struct VO { @builtin(position) cp: vec4f, @location(0) wp: vec3f, @location(1) n
   let bank = -.28 * sign(i.b.y);
   let S2 = S * cos(bank) + Up * sin(bank); Up = Up * cos(bank) - S * sin(bank); S = S2;
   let u = i.n.w; let au = abs(u);
-  let fp = t * 1.25 + i.b.w * 5. - au * 1.2;
-  let amp = .36 * pow(au, 1.6);
+  let fl = ss(.55, .95, sin(t * .17 + i.b.w * 7.));
+  let fp = t * 2.4 + i.b.w * 5.;
+  let amp = .42 * pow(au, 1.6) * fl;
   var l = i.p;
-  l.y += amp * sin(fp) - .1 * sin(t * 1.25 + i.b.w * 5.);
+  l.y += amp * sin(fp) + .04 * au * au;
   let tail = ss(-.5, -1.9, l.z) * step(au, .001);
   l.x += tail * sin(t * .8 + l.z * 2.) * .12;
-  let sl = (.576 * pow(au, .6) * sin(fp) - .43 * pow(au, 1.6) * cos(fp)) * sign(u);
+  let sl = (.672 * pow(au, .6) * sin(fp) * fl + .08 * au) * sign(u);
   let ln = normalize(vec3f(i.n.x - sl * i.n.y, i.n.y + sl * i.n.x, i.n.z));
   let w = P + (S * l.x + Up * l.y + T * l.z) * sz;
   o.cp = g.vp * vec4f(w, 1.); o.wp = w; o.n = S * ln.x + Up * ln.y + T * ln.z; o.op = i.p; o.sd = i.b.w;
@@ -798,8 +802,8 @@ fn quad(i: u32) -> vec2f { return vec2f(f32(i & 1u), f32(i >> 1u)) * 2. - 1.; }
   let h = life * tr;
   var p = a.xyz + vec3f(0., h, 0.);
   let wob = b.w * (.3 + abs(h) * .04);
-  p.x += sin(t * .9 + sd * 50. + h * .4) * wob + sin(h * .13 + sd * 9.) * b.w * 2.;
-  p.z += cos(t * .7 + sd * 33. + h * .35) * wob + cos(h * .11 + sd * 7.) * b.w * 2.;
+  p.x += sin(t * 1.3 + sd * 50. + h * .4) * wob * .4 + WIND.x * abs(h) * .45;
+  p.z += cos(t * 1.1 + sd * 33. + h * .35) * wob * .4 + WIND.y * abs(h) * .45;
   let d = length(p - g.cam.xyz);
   let s0 = a.w * ss(0., .08, life) * ss(1., .75, life);
   let sz = max(s0, d * .0013);
@@ -819,7 +823,7 @@ fn quad(i: u32) -> vec2f { return vec2f(f32(i & 1u), f32(i >> 1u)) * 2. - 1.; }
 @vertex fn vsSnow(@builtin(vertex_index) vi: u32, @location(0) a: vec4f) -> VO {
   var o: VO; let q = quad(vi); let t = g.cam.w;
   let B = 44.;
-  var p = a.xyz * B + vec3f(t * .22, t * .05, t * .13) + .5 * vec3f(sin(t * .3 + a.x * 60.), sin(t * .23 + a.y * 50.), cos(t * .27 + a.z * 70.));
+  var p = a.xyz * B + vec3f(WIND.x * t * (1.2 + a.w), -t * .08, WIND.y * t * (1.2 + a.w)) + .25 * vec3f(sin(t * .9 + a.x * 60.), sin(t * .7 + a.y * 50.), cos(t * .8 + a.z * 70.));
   p = g.cam.xyz + (fract((p - g.cam.xyz) / B + .5) - .5) * B;
   let d = length(p - g.cam.xyz);
   let sz = (.012 + .045 * a.w * a.w * a.w);
