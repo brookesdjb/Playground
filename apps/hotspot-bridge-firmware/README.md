@@ -155,6 +155,16 @@ static.tp-link.com. The overlay is in `files/`:
 * `usr/libexec/hotspotbridge/ensure-wifi`: setup AP on each radio, plus a disabled `uplink` STA (runs from boot and from Wi-Fi hotplug, and is safe to repeat)
 * `www/hb/index.html` and `www/cgi-bin/hb`: the web page and its JSON API (POSTs must be JSON/binary and same-origin)
 
+## Tests (host-side, no router needed)
+
+After `./build.sh`, with busybox installed on the host:
+
+```sh
+bash tests/test-config.sh          # first-boot defaults, ensure-wifi, web API config actions
+bash tests/test-restore.sh         # stock-restore validation against the built images
+node tests/ui-test.js ui.png       # web page against a mock API (needs Playwright)
+```
+
 ## Status / caveats
 
 * Built and checked off-device: the image layout matches the official v4 TFTP image, and the shell
