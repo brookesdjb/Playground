@@ -9,18 +9,39 @@ set network.lan.ipaddr='192.168.88.1'
 set network.lan.netmask='255.255.255.0'
 set network.wwan=interface
 set network.wwan.proto='dhcp'
+set network.wwan.metric='20'
+set dhcp.@dnsmasq[0].rebind_protection='0'
+EOF
+uplinks="wwan"
+
+if [ -x /usr/sbin/odhcp6c ]; then
+	uci -q batch <<'EOF'
 set network.wwan6=interface
 set network.wwan6.proto='dhcpv6'
 set network.wwan6.device='@wwan'
-set dhcp.@dnsmasq[0].rebind_protection='0'
 EOF
+	uplinks="$uplinks wwan6"
+fi
 
-# Put the Wi-Fi uplink into the firewall "wan" zone (NAT + masquerade).
+# iPhone USB tethering (only in builds that include the ipheth driver).
+# The device name is corrected by /etc/hotplug.d/net/30-hotspotbridge-iphone.
+# Metric 10 < 20: a plugged-in iPhone is preferred over the Wi-Fi hotspot.
+if [ -e /etc/modules.d/usb-net-ipheth ]; then
+	uci -q batch <<'EOF'
+set network.iphone=interface
+set network.iphone.proto='dhcp'
+set network.iphone.device='eth1'
+set network.iphone.metric='10'
+EOF
+	uplinks="$uplinks iphone"
+fi
+
+# Put the uplinks into the firewall "wan" zone (NAT + masquerade).
 for z in $(uci show firewall | sed -n "s/^firewall\.\([^.]*\)\.name='wan'$/\1/p"); do
-	uci -q del_list firewall."$z".network='wwan'
-	uci -q del_list firewall."$z".network='wwan6'
-	uci add_list firewall."$z".network='wwan'
-	uci add_list firewall."$z".network='wwan6'
+	for n in $uplinks; do
+		uci -q del_list firewall."$z".network="$n"
+		uci add_list firewall."$z".network="$n"
+	done
 done
 
 uci commit system

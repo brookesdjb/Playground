@@ -15,12 +15,26 @@ overlay in `files/`.
 > only be installed through the bootloader's TFTP recovery, described below.
 > The same applies to this firmware.
 
+## Two variants
+
+The 8 MB flash can't hold everything, so there are two builds. Pick one; you can switch later from the web page.
+
+| | **standard** | **iphone** |
+|---|---|---|
+| Wi-Fi hotspot uplink with MAC cloning | yes | yes |
+| iPhone USB tethering (Personal Hotspot over USB) | no | **yes** |
+| Hotspot security supported | open, OWE, WPA/WPA2/WPA3 | open, WPA/WPA2 (WPA2/WPA3 "transition" networks connect as WPA2) |
+| LuCI (full OpenWrt web admin) | yes | no: Hotspot Bridge page + SSH only |
+| Free flash for settings | ~1.3 MB | ~320 KB (plenty for config and the iPhone pairing record) |
+
+Both have the Hotspot Bridge web page, SSH (`ssh root@192.168.88.1`), flash backup and stock restore.
+
 ## Files (after `./build.sh`, in `out/`)
 
 | File | Use |
 |---|---|
-| `install-via-tftp/tp_recovery.bin` | Install Hotspot Bridge through TFTP recovery (first install) |
-| `hotspotbridge-sysupgrade.bin` | Update an existing Hotspot Bridge/OpenWrt install from the web page |
+| `<variant>/install-via-tftp/tp_recovery.bin` | Install Hotspot Bridge through TFTP recovery (first install) |
+| `<variant>/hotspotbridge-<variant>-sysupgrade.bin` | Update an existing install, or switch variant, from the web page |
 | `restore-stock/TL-WR902ACv4_EU_0.9.1_stock-original.bin` | Restore TP-Link firmware from the Hotspot Bridge web page |
 | `restore-stock/via-tftp/tp_recovery.bin` | Restore TP-Link firmware through TFTP recovery (works even if Linux won't boot) |
 | `restore-stock/stock-firmware-part.bin` | Same as above, pre-stripped to the `firmware` partition (for `sysupgrade -F -n`) |
@@ -34,7 +48,7 @@ parents' house has no internet, so you can't download them later.
 You need a laptop with an Ethernet port (or a USB adapter) and a TFTP server:
 Windows: **Tftpd64**; macOS: built-in `tftpd` or **TftpServer**; Linux: `dnsmasq` or `tftpd-hpa`.
 
-1. Put `install-via-tftp/tp_recovery.bin` in the TFTP server's folder. The name must be exactly `tp_recovery.bin`.
+1. Put `<variant>/install-via-tftp/tp_recovery.bin` in the TFTP server's folder. The name must be exactly `tp_recovery.bin`.
 2. Give the laptop's Ethernet port the static address **192.168.0.66**, netmask 255.255.255.0.
    Turn the laptop's Wi-Fi off, and allow TFTP (UDP 69) through its firewall.
 3. Connect the laptop to the router's Ethernet port with a cable.
@@ -80,12 +94,29 @@ laptop's address and firewall.
 **Reverse trick (no cloning):** leave the MAC empty and connect, then copy the *Uplink MAC* shown in
 Status to your laptop's Wi-Fi adapter and log in to the portal with the laptop.
 
+## 3b. iPhone USB tethering (iphone variant)
+
+1. On the iPhone, turn on Settings → Personal Hotspot → **Allow Others to Join**.
+2. Plug the iPhone into the router's **USB-A port** with its normal cable, and unlock it.
+3. The first time, the iPhone asks **"Trust This Computer?"**. Tap Trust and enter your passcode.
+   The pairing is stored in `/etc/lockdown` on the router, so you don't have to do this again.
+4. Within about 10 seconds, Status shows *iPhone USB: tethering* with a 172.20.10.x address. Everything on
+   Ethernet and the setup Wi-Fi now uses the iPhone's mobile data.
+
+* When both the iPhone and a Wi-Fi hotspot are connected, the iPhone is used (route metric 10 vs 20).
+  Unplug it to fall back to the hotspot.
+* The phone charges from the router. Power the router from a good **2 A or higher** USB supply, or it may brown out.
+* If it stays at "plugged in", unplug, unlock the phone, plug back in, and check Personal Hotspot is still on.
+  Over SSH, `logread | grep -iE 'usbmux|ipheth|iphone'` shows what happened.
+* Android USB tethering is **not** included (it needs other drivers). Ask if you need it.
+
 Notes
 * The setup Wi-Fi is switched off on the band the uplink uses, and stays on the other band. Ethernet always works.
 * Supported security: open, OWE, WPA/WPA2/WPA3-Personal. Enterprise (802.1X, e.g. eduroam) is not supported.
 * DNS rebind protection is off so portals that resolve to private IPs work.
-* The setup page has no login; only devices on the LAN side can reach it. LuCI is at
-  `/cgi-bin/luci` (user `root`, no password until you set one in LuCI → System → Administration).
+* The setup page has no login; only devices on the LAN side can reach it. SSH (`ssh root@192.168.88.1`)
+  and, in the standard build, LuCI at `/cgi-bin/luci` both use user `root` with no password until you
+  set one (`passwd`).
 
 ## 4. Restore TP-Link stock firmware
 

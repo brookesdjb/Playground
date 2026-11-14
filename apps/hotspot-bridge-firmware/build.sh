@@ -23,7 +23,17 @@ STOCK_URL='https://static.tp-link.com/upload/firmware/2025/202501/20250126/TL-WR
 STOCK_ZIP_SHA256=a5ffea54f7bbef580e08c41786b23f405b38b6b1fccb9f389b032ba43ca989bc
 STOCK_BIN_SHA256=aa58a4ae0ce86332236abc5449cf2da2450d7f412470c86102b2e40c911c5500
 
-PACKAGES="luci iw"
+# Two variants (the 8 MB flash can't hold everything):
+#   standard: LuCI web admin + WPA3/OWE uplinks
+#   iphone:   + iPhone USB tethering (ipheth + usbmuxd); drops LuCI, WPA3/OWE,
+#             PPPoE, IPv6 DHCP server, the apk package manager and HTTPS certs
+PKGS_standard="luci iw"
+PKGS_iphone="uhttpd rpcd rpcd-mod-iwinfo kmod-usb-net-ipheth usbmuxd \
+	-ppp -ppp-mod-pppoe -apk-mbedtls -ca-bundle -libustream-mbedtls \
+	-odhcpd-ipv6only -kmod-nft-offload -wpad-basic-mbedtls wpad-mini"
+VARIANTS=${VARIANTS:-"standard iphone"}
+FW_PART=7995392          # firmware partition; the rest after the image holds settings
+MIN_FREE=262144          # require >= 256 KiB left for the settings overlay
 
 mkdir -p "$WORK" "$OUT"
 
@@ -51,23 +61,32 @@ chmod 0755 "$STAGE_FILES/www/cgi-bin/hb" \
 	"$STAGE_FILES/etc/init.d/hotspotbridge" \
 	"$STAGE_FILES/etc/uci-defaults/90-hotspotbridge" \
 	"$STAGE_FILES/usr/libexec/hotspotbridge/ensure-wifi" \
-	"$STAGE_FILES/etc/hotplug.d/ieee80211/20-hotspotbridge"
+	"$STAGE_FILES/etc/hotplug.d/ieee80211/20-hotspotbridge" \
+	"$STAGE_FILES/etc/hotplug.d/net/30-hotspotbridge-iphone"
 
 # ---- Build -----------------------------------------------------------------
-echo ">> building $PROFILE"
-rm -rf "$OUT/openwrt"
-make -C "$WORK/$IB_NAME" image \
-	PROFILE="$PROFILE" \
-	PACKAGES="$PACKAGES" \
-	FILES="$STAGE_FILES" \
-	EXTRA_IMAGE_NAME=hotspotbridge \
-	BIN_DIR="$OUT/openwrt"
+for v in $VARIANTS; do
+	eval "pkgs=\$PKGS_$v"
+	echo ">> building $PROFILE ($v)"
+	rm -rf "$OUT/openwrt-$v" "$OUT/$v"
+	make -C "$WORK/$IB_NAME" image \
+		PROFILE="$PROFILE" \
+		PACKAGES="$pkgs" \
+		FILES="$STAGE_FILES" \
+		EXTRA_IMAGE_NAME="hotspotbridge-$v" \
+		BIN_DIR="$OUT/openwrt-$v"
 
-TFTP_IMG=$(ls "$OUT"/openwrt/*-squashfs-tftp-recovery.bin)
-SYSUP_IMG=$(ls "$OUT"/openwrt/*-squashfs-sysupgrade.bin)
-mkdir -p "$OUT/install-via-tftp"
-cp "$TFTP_IMG" "$OUT/install-via-tftp/tp_recovery.bin"
-cp "$SYSUP_IMG" "$OUT/hotspotbridge-sysupgrade.bin"
+	sysup=$(ls "$OUT/openwrt-$v"/*-squashfs-sysupgrade.bin 2>/dev/null || true)
+	tftp=$(ls "$OUT/openwrt-$v"/*-squashfs-tftp-recovery.bin 2>/dev/null || true)
+	[ -n "$sysup" ] && [ -n "$tftp" ] || { echo "!! $v: image too big for flash" >&2; exit 1; }
+	free=$((FW_PART - $(stat -c %s "$sysup")))
+	echo ">> $v: $free bytes left for settings"
+	[ "$free" -ge "$MIN_FREE" ] || { echo "!! $v: only $free bytes left for settings" >&2; exit 1; }
+
+	mkdir -p "$OUT/$v/install-via-tftp"
+	cp "$tftp" "$OUT/$v/install-via-tftp/tp_recovery.bin"
+	cp "$sysup" "$OUT/$v/hotspotbridge-$v-sysupgrade.bin"
+done
 
 # ---- Stock restore images ----------------------------------------------------
 fetch "$STOCK_URL" "$WORK/stock-0.9.1.zip" "$STOCK_ZIP_SHA256"

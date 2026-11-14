@@ -1,0 +1,18 @@
+#!/bin/sh
+# When an iPhone's tethering interface (driver ipheth) appears, make sure the
+# "iphone" network uses it, whatever the kernel named it.
+
+[ "$ACTION" = "add" ] || exit 0
+[ "$(uci -q get network.iphone)" = "interface" ] || exit 0
+case "$(readlink "/sys/class/net/$INTERFACE/device/driver" 2>/dev/null)" in
+	*/ipheth) ;;
+	*) exit 0 ;;
+esac
+
+if [ "$(uci -q get network.iphone.device)" != "$INTERFACE" ]; then
+	uci set network.iphone.device="$INTERFACE"
+	uci commit network
+	/etc/init.d/network reload
+fi
+logger -t hotspotbridge "iPhone tethering interface $INTERFACE detected"
+exit 0

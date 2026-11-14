@@ -55,7 +55,11 @@ a{color:var(--accent)}
 <dt>Uplink MAC</dt><dd id="s-mac" class="mono">&ndash;</dd>
 <dt>Uplink IP</dt><dd id="s-ip" class="mono">&ndash;</dd>
 <dt>Internet</dt><dd id="s-net">not checked</dd>
+<dt class="iph" hidden>iPhone USB</dt><dd class="iph" id="s-iph" hidden>&ndash;</dd>
 </dl>
+<p class="hint iph" hidden>iPhone tethering: plug the iPhone into the router's USB port, unlock it, tap <b>Trust</b>
+(first time only), and turn on Settings &rarr; Personal Hotspot &rarr; <i>Allow Others to Join</i>. When the iPhone is
+connected it is used in preference to the Wi-Fi hotspot. Power the router from a 2&nbsp;A+ supply &mdash; it also charges the phone.</p>
 <div class="btns">
 <button class="ghost" id="b-check">Check internet</button>
 <button class="ghost" id="b-disc">Disconnect uplink</button>
@@ -141,7 +145,8 @@ private/random MAC per network, so read it from that network's details (Windows:
 <label><input type="checkbox" id="f-keep"> Keep current settings</label>
 <div class="btns"><button id="b-up">Flash image</button><button class="ghost" id="b-reboot">Reboot</button></div>
 <div class="msg" id="m-fw"></div>
-<p class="hint">Advanced settings (full OpenWrt LuCI): <a href="/cgi-bin/luci/">/cgi-bin/luci</a> &mdash; user <span class="mono">root</span>, no password until you set one.</p>
+<p class="hint" id="adv">Advanced: <span id="adv-luci" hidden>OpenWrt LuCI at <a href="/cgi-bin/luci/">/cgi-bin/luci</a>, or </span>SSH
+<span class="mono">ssh root@192.168.88.1</span> &mdash; no password until you set one (<span class="mono">passwd</span>).</p>
 </section>
 </main>
 
@@ -172,7 +177,15 @@ async function refresh() {
   $('rel').textContent = S.release || '';
   $('lanip').textContent = S.lan_ip;
   const sel = $('c-radio');
+  const feat = S.features || {};
   if (!sel.options.length) {
+    const enc = $('c-enc');
+    [...enc.options].forEach(o => {
+      if ((o.value === 'sae' || o.value === 'sae-mixed') && !feat.sae) o.remove();
+      if (o.value === 'owe' && !feat.owe) o.remove();
+    });
+    $('adv-luci').hidden = !feat.luci;
+    document.querySelectorAll('.iph').forEach(e => e.hidden = !feat.iphone);
     S.radios.forEach(r => sel.add(new Option(bandName(r.band) + ' (' + r.name + ')', r.name)));
     if (S.uplink.radio) sel.value = S.uplink.radio;
     $('w-ssid').value = S.setup.ssid;
@@ -197,20 +210,32 @@ async function refresh() {
   const a4 = (w['ipv4-address'] || [])[0];
   const gw = ((w.route || []).find(r => r.target === '0.0.0.0') || {}).nexthop;
   $('s-ip').textContent = a4 ? a4.address + '/' + a4.mask + (gw ? '  via ' + gw : '') : '–';
+
+  if (feat.iphone) {
+    const ip = S.iphone || {}, n = S.iphone_net || {};
+    const ia = (n['ipv4-address'] || [])[0];
+    let h;
+    if (n.up && ia) h = '<span class="pill ok">tethering</span> <span class="mono">' + ia.address + '</span>' + (up.enabled ? ' (preferred over Wi-Fi)' : '');
+    else if (ip.attached && ip.carrier === '1') h = '<span class="pill warn">connected, waiting for IP</span>';
+    else if (ip.attached) h = '<span class="pill warn">plugged in</span> unlock it, tap Trust, turn on Personal Hotspot';
+    else h = '<span class="pill">not connected</span>' + (ip.paired ? ' (trusted before)' : '');
+    $('s-iph').innerHTML = h;
+  }
 }
 
 function encOf(e) {
   if (!e || !e.enabled) return 'none';
   const auth = e.authentication || [], wpa = e.wpa || [];
   if (auth.includes('802.1x')) return 'eap';
-  if (auth.includes('owe')) return 'owe';
-  if (auth.includes('sae') && auth.includes('psk')) return 'sae-mixed';
-  if (auth.includes('sae')) return 'sae';
+  const f = (S && S.features) || {};
+  if (auth.includes('owe')) return f.owe ? 'owe' : 'unsup';
+  if (auth.includes('sae') && auth.includes('psk')) return f.sae ? 'sae-mixed' : 'psk2';
+  if (auth.includes('sae')) return f.sae ? 'sae' : 'unsup';
   if (wpa.includes(1) && wpa.includes(2)) return 'psk-mixed';
   if (wpa.includes(1) && !wpa.includes(2)) return 'psk-mixed';
   return 'psk2';
 }
-const encLabel = {none: 'Open', owe: 'OWE', 'sae-mixed': 'WPA2/3', sae: 'WPA3', 'psk-mixed': 'WPA/WPA2', psk2: 'WPA2', eap: 'Enterprise (unsupported)'};
+const encLabel = {none: 'Open', owe: 'OWE', 'sae-mixed': 'WPA2/3', sae: 'WPA3', 'psk-mixed': 'WPA/WPA2', psk2: 'WPA2', eap: 'Enterprise (unsupported)', unsup: 'WPA3/OWE (not in this build)'};
 
 $('b-scan').onclick = async e => {
   busy(e.target, true); $('scan-hint').textContent = 'Scanning… (up to 20 s)';
@@ -225,9 +250,12 @@ $('b-scan').onclick = async e => {
       [x.ssid, (x.signal || '?') + ' dBm', x.channel || '', encLabel[enc]].forEach(t => { const td = document.createElement('td'); td.textContent = t; tr.appendChild(td); });
       tr.onclick = () => {
         $('c-ssid').value = x.ssid; selBssid = x.bssid || ''; $('c-bssid').textContent = selBssid || '–';
-        if (enc !== 'eap') $('c-enc').value = enc;
+        const bad = enc === 'eap' || enc === 'unsup';
+        if (!bad) $('c-enc').value = enc;
         if (enc === 'none') $('c-key').value = '';
-        $('scan-hint').textContent = enc === 'eap' ? 'Enterprise (802.1X) networks are not supported by this firmware.' : 'Selected ' + x.ssid + '.';
+        $('scan-hint').textContent = enc === 'eap' ? 'Enterprise (802.1X) networks are not supported by this firmware.'
+          : enc === 'unsup' ? 'This network needs WPA3/OWE, which this (iPhone) build leaves out to save space - use the standard build.'
+          : 'Selected ' + x.ssid + '.';
       };
       tb.appendChild(tr);
     });

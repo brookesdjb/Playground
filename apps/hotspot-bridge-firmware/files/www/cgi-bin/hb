@@ -37,6 +37,9 @@ hexbytes() { hexdump -v -s "$2" -n "$3" -e '1/1 "%02x"' "$1"; }
 is_radio() { [ -n "$1" ] && [ "$(uci -q get wireless."$1")" = "wifi-device" ]; }
 radios() { uci -q show wireless | sed -n "s/^wireless\.\([^.]*\)=wifi-device$/\1/p"; }
 setup_ifaces() { uci -q show wireless | sed -n "s/^wireless\.\(setup_[^.]*\)=wifi-iface$/\1/p"; }
+has_sae() { /usr/sbin/hostapd -vsae >/dev/null 2>&1; }
+has_owe() { /usr/sbin/hostapd -vowe >/dev/null 2>&1; }
+has_iphone() { [ -e /etc/modules.d/usb-net-ipheth ]; }
 reload_wifi_later() { setsid sh -c 'sleep 1; /sbin/wifi reload' </dev/null >/dev/null 2>&1 & }
 
 valid_key() { # $1=encryption $2=key
@@ -75,6 +78,27 @@ a_status() {
 	json_add_string actual_mac "$(cat /sys/class/net/hbsta/address 2>/dev/null)"
 	json_close_object
 
+	json_add_object features
+	json_add_boolean sae "$(has_sae && echo 1 || echo 0)"
+	json_add_boolean owe "$(has_owe && echo 1 || echo 0)"
+	json_add_boolean iphone "$(has_iphone && echo 1 || echo 0)"
+	json_add_boolean luci "$([ -d /www/luci-static ] && echo 1 || echo 0)"
+	json_close_object
+
+	if has_iphone; then
+		local idev attached carrier paired
+		idev=$(uci -q get network.iphone.device)
+		attached=0; ls /sys/bus/usb/drivers/ipheth/ 2>/dev/null | grep -q ':' && attached=1
+		carrier=$(cat "/sys/class/net/$idev/carrier" 2>/dev/null)
+		paired=0; ls /etc/lockdown/ 2>/dev/null | grep -v '^SystemConfiguration.plist$' | grep -q '\.plist$' && paired=1
+		json_add_object iphone
+		json_add_boolean attached "$attached"
+		json_add_string device "$idev"
+		json_add_string carrier "$carrier"
+		json_add_boolean paired "$paired"
+		json_close_object
+	fi
+
 	json_add_object setup
 	json_add_string ssid "$(uci -q get hotspotbridge.main.setup_ssid)"
 	json_add_boolean secured "$([ -n "$(uci -q get hotspotbridge.main.setup_key)" ] && echo 1 || echo 0)"
@@ -94,8 +118,13 @@ a_status() {
 	done
 	json_close_array
 
+	iph=null
+	if has_iphone; then
+		iph=$(ubus call network.interface.iphone status 2>/dev/null); [ -n "$iph" ] || iph=null
+	fi
+
 	base=$(json_dump | sed 's/ *}$//')
-	out "$base, \"wwan\": $wwan, \"sta\": $sta }"
+	out "$base, \"wwan\": $wwan, \"sta\": $sta, \"iphone_net\": $iph }"
 }
 
 a_scan() {
@@ -157,6 +186,10 @@ a_connect() {
 	case "$enc" in
 		none|owe|psk|psk2|psk-mixed|sae|sae-mixed) ;;
 		*) err "Unsupported security type: $enc" ;;
+	esac
+	case "$enc" in
+		sae|sae-mixed) has_sae || err "This build has no WPA3 support - choose WPA2 (most WPA2/WPA3 networks accept WPA2)" ;;
+		owe) has_owe || err "This build has no Enhanced Open (OWE) support" ;;
 	esac
 	valid_key "$enc" "$key" || err "Password must be 8-63 characters (or 64 hex digits)"
 	if [ -n "$mac" ]; then
