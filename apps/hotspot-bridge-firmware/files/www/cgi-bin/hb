@@ -2,7 +2,7 @@
 # Hotspot Bridge web API (served by uhttpd as /cgi-bin/hb?a=<action>).
 # GET : status, scan, check, backup
 # POST: connect, disconnect, setup, country, restore_stock, upgrade, reboot
-# POSTs must carry the header "X-HB: 1" (blocks cross-site form posts).
+# POSTs must be JSON or octet-stream and same-origin (blocks cross-site posts).
 
 . /usr/share/libubox/jshn.sh
 
@@ -24,9 +24,20 @@ okmsg() { json_init; json_add_boolean ok 1; json_add_string message "$1"; out "$
 # Query-string values here are simple tokens; strip anything else.
 qs() { echo "$QUERY_STRING" | tr '&' '\n' | sed -n "s/^$1=//p" | head -n1 | tr -cd 'a-zA-Z0-9_-'; }
 
+# Cross-site protection. uhttpd only passes standard headers to CGI (custom
+# ones like X-* never arrive), so instead:
+#  - require a JSON/binary Content-Type: a page on another site can't send
+#    those to us without a CORS preflight, which uhttpd never approves;
+#  - if the browser sent an Origin, it must be this router's own address.
 require_post() {
 	[ "$REQUEST_METHOD" = "POST" ] || err "POST required" "405 Method Not Allowed"
-	[ "$HTTP_X_HB" = "1" ] || err "Missing X-HB header" "403 Forbidden"
+	case "$CONTENT_TYPE" in
+		application/json*|application/octet-stream*) ;;
+		*) err "Requests must be sent by the Hotspot Bridge page (bad Content-Type)" "403 Forbidden" ;;
+	esac
+	if [ -n "$HTTP_ORIGIN" ] && [ "${HTTP_ORIGIN#*://}" != "$HTTP_HOST" ]; then
+		err "Cross-site request refused (Origin $HTTP_ORIGIN)" "403 Forbidden"
+	fi
 }
 read_json() {
 	require_post

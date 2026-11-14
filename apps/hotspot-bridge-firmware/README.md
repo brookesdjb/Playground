@@ -153,7 +153,7 @@ static.tp-link.com. The overlay is in `files/`:
 
 * `etc/uci-defaults/90-hotspotbridge`: first boot sets LAN 192.168.88.1, adds `wwan` (DHCP) to the wan firewall zone, and disables DNS rebind protection
 * `usr/libexec/hotspotbridge/ensure-wifi`: setup AP on each radio, plus a disabled `uplink` STA (runs from boot and from Wi-Fi hotplug, and is safe to repeat)
-* `www/hb/index.html` and `www/cgi-bin/hb`: the web page and its JSON API (POSTs require an `X-HB: 1` header)
+* `www/hb/index.html` and `www/cgi-bin/hb`: the web page and its JSON API (POSTs must be JSON/binary and same-origin)
 
 ## Status / caveats
 

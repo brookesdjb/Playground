@@ -163,7 +163,7 @@ async function get(a) {
   return r.json();
 }
 async function post(a, body, raw) {
-  const opts = {method: 'POST', headers: {'X-HB': '1'}, body: raw ? body : JSON.stringify(body || {})};
+  const opts = {method: 'POST', headers: {}, body: raw ? body : JSON.stringify(body || {})};
   opts.headers['Content-Type'] = raw ? 'application/octet-stream' : 'application/json';
   const r = await fetch(API + a, opts);
   return r.json();
