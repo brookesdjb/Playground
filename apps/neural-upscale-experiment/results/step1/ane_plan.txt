@@ -1,0 +1,5 @@
+blend.mlpackage ["ANE": 14] cost off-ANE 0.0000 of 1.0000
+medium.mlpackage ["ANE": 23] cost off-ANE 0.0000 of 1.0000
+small.mlpackage ["ANE": 19] cost off-ANE 0.0000 of 1.0000
+temporal.mlpackage ["ANE": 20] cost off-ANE 0.0000 of 1.0000
+tiny.mlpackage ["ANE": 15] cost off-ANE 0.0000 of 1.0000
