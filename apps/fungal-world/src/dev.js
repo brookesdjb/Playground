@@ -42,6 +42,8 @@ window.__dev = {
   go: () => { ui(false); dynT = -Infinity; },
   pose: (i) => lookAt(...POSES[i]),
   cam: (a) => lookAt(...a),
+  // camera on the scripted path at time t (0-60 s), turned by dyaw / dpitch radians (training-data capture)
+  flyTo: (t, dyaw = 0, dpitch = 0) => { F[FLT] = t; flyAt(); F[YAW] += dyaw; F[PIT] += dpitch; },
   time: (t) => { F[TIME] = t; },
   info: () => ({ W, H, LV, pix, det }),
   // what the generator made: one-off fungus triangles, small fungus instances, leaves, motes

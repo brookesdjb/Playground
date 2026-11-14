@@ -900,6 +900,6 @@ fn sat3(x: vec3f) -> vec3f { return clamp(x, vec3f(0.), vec3f(1.)); }
   c = mix(vec3f(l), c, .93) + vec3f(.008, .002, 0.);
   c = pow(max(c, vec3f(0.)), vec3f(1. / 2.2));
   let n = ign(fc.xy) + ign(fc.xy + 37.) - 1.;
-  return vec4f(c + n / 255., 1.);
+  return vec4f(c + n / 255. * ${location.hash.includes('nograin') ? 0 : 1}., 1.); // #nograin: no dither (training data)
 }
 `;

@@ -1,0 +1,5 @@
+torch
+coremltools>=8
+numpy
+pillow
+lpips  # optional: perceptual metric

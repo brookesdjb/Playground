@@ -1,0 +1,8 @@
+{
+  "name": "neural-upscale-experiment",
+  "private": true,
+  "description": "Is the Apple Neural Engine a viable home for a DLSS-style upscaler? Timing and quality experiment.",
+  "devDependencies": {
+    "playwright": "^1.50.0"
+  }
+}
