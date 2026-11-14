@@ -93,7 +93,9 @@ fn dens(p: vec3f) -> f32 {
   // blocky jointing (stretched cells) instead of rounded lumps, plus fine noise
   d += rk * ((.5 - wor(p * vec3f(.11, .04, .11) + w * 2.)) * 1.4 + (fbm(p * vec3f(.25, .6, .25), 3) - .5) * 1.1);
   // sandstone beds: alternating hard ledges and soft recesses
-  d += rk * 3.4 * (abs(fract(p.y * .17 + w.y * .35) - .5) - .25) + rk * 1.1 * (abs(fract(p.y * .55 + w.y * .7) - .5) - .25);
+  let sy = p.y * .17 + w.y * .35 + .9 * sin(p.y * .071 + 1.3) + .3 * sin(p.y * .23 + w.x * 2.);
+  let sy2 = p.y * .53 + w.y * .7 + .6 * sin(p.y * .19 + 4.);
+  d += rk * (1.4 + 3.2 * h31(vec3f(floor(sy), 3., 7.))) * (abs(fract(sy) - .5) - .25) + rk * 1.6 * h31(vec3f(floor(sy2), 9., 1.)) * (abs(fract(sy2) - .5) - .25);
   for (var i = 0u; i < u.c.z; i++) {
     let a = P[k]; let b = P[k + 1u]; k += 2u;
     d = smin(d, seg3(p + w * 2., a.xyz, b.xyz) - a.w, 2.);
@@ -263,8 +265,9 @@ fn sky(rd: vec3f, sun: vec3f, z: f32) -> vec3f {
   var c = mix(SKYH, SKYZ, pow(ss(-.02, .9, y), .55));
   c += vec3f(.55, .32, .16) * pow(max(mu, 0.), 4.) * (1. - ss(0., .7, y)) * .9;
   if (y > 0.) { // high wisps of cirrus, stretched along the wind
-    let uv = rd.xz / (y + .15) * 1.1; let st = vec2f(dot(uv, vec2f(.8, .6)) * .35, dot(uv, vec2f(-.6, .8)) * 2.2);
-    let cl = ss(.55, .9, n2(st * 1.7 + vec2f(3., 1.)) * .6 + n2(st * 4.3) * .4) * ss(.02, .2, y) * (1. - ss(.35, .8, y));
+    let uv = rd.xz / (y + .15) * 1.1; var st = vec2f(dot(uv, vec2f(.8, .6)) * .5, dot(uv, vec2f(-.6, .8)) * 1.2);
+    st += vec2f(n2(uv * .9 + 7.), n2(uv * .9 + 3.)) * 1.6;
+    let cl = ss(.58, .92, n2(st * 1.3 + vec2f(3., 1.)) * .55 + n2(st * 3.1 + 5.) * .3 + n2(uv * 6.) * .15) * ss(.02, .2, y) * (1. - ss(.35, .8, y)) * ss(.3, .6, n2(uv * .35 + 11.));
     c = mix(c, mix(vec3f(.85, .82, .80), vec3f(1.3, .95, .7), pow(max(mu, 0.), 3.)), cl * .55);
   }
   let pl = planet(rd, sun); c = mix(c, c + pl.rgb, pl.a * ss(-.02, .04, y));
@@ -366,20 +369,26 @@ fn tri(p: vec3f, n: vec3f, s: f32) -> TP {
   var bump = 1.; var gloss = .1; var alb = vec3f(0.); var emi = vec3f(0.); var vao = 1.; var flu = 0.;
   let flt = ss(.72, .93, n0.y);
   var rip = vec3f(0.); var spark = 0.; var sandK = 0.;
-  let vt = textureSample(tD, sR, vec2f((i.op.x + i.op.z) * .17, i.op.y * .018));
+  // varnish streak texture: projected along x and along z, blended by which way the wall faces (stable on curved slopes)
+  let vwx = textureSample(tD, sR, vec2f(i.op.x * .061, i.op.y * .011)).a * .6 + textureSample(tD, sR, vec2f(i.op.x * .143 + .37, i.op.y * .019)).a * .4;
+  let vwz = textureSample(tD, sR, vec2f(i.op.z * .061 + .5, i.op.y * .011)).a * .6 + textureSample(tD, sR, vec2f(i.op.z * .143 + .81, i.op.y * .019)).a * .4;
+  let nxz = i.n.x * i.n.x / max(i.n.x * i.n.x + i.n.z * i.n.z, 1e-4);
+  let vt = vec4f(0., 0., 0., mix(vwx, vwz, ss(.25, .75, nxz)));
   if (mat <= 1) {
     // sandstone: beds of red, orange, cream and purple-brown, cross-bedding inside each bed, dark desert varnish
     // streaking down the steep faces
-    let st = i.op.y * .42 + A.h * .9 + big * 1.6 + big2 * .8;
+    // beds follow height; only a slow, gentle wobble, or gentle slopes turn them into contour-line swirls
+    let st = i.op.y * .42 + 1.5 * sin(i.op.y * .13 + 2.) + .5 * sin(i.op.y * .31 + 1.) + big * .18;
     let bed = hs(floor(st)); let sf = fract(st);
     var sc = mix(vec3f(.58, .27, .15), vec3f(.74, .45, .25), ss(.2, .45, bed));
     sc = mix(sc, vec3f(.80, .66, .48), ss(.62, .8, bed));
     sc = mix(sc, vec3f(.44, .26, .23), ss(.88, .95, bed));
-    alb = sc * (.75 + .35 * B.h) * (.85 + .3 * sin(sf * 18. + A.h * 9.) * .5);
+    alb = sc * (.78 + .3 * B.c) * (.95 + .06 * sin(sf * 9. + A.c * 2.));
     alb *= 1. - .35 * ss(.1, .0, sf) * (1. - abs(on.y));
     let steep = 1. - ss(.35, .75, abs(n0.y));
     let varn = ss(.5, .72, vt.a + big2 * .3) * steep;
-    alb = mix(alb, vec3f(.12, .08, .07) * (.7 + .5 * C.h), varn * .7);
+    alb = mix(alb, vec3f(.12, .08, .07) * (.7 + .5 * C.c), varn * .7);
+    bump = .5;
     alb = mix(alb, alb * vec3f(1.08, .98, .9) + vec3f(.03, .02, .01), ss(.4, .7, C.c) * .3);
     alb *= mix(1., .7 + .6 * F.h, fk);
     if (mat == 0) {
@@ -799,7 +808,7 @@ const W_RAYS = S_G + W_FS + /*wgsl*/`
   let rl = length(rv); let rd = rv / rl;
   // linear depth, kept below the half-float limit (open sky has a depth of ~0)
   let zl = min(g.fwd.w / max(dp, 1e-6), 3e4);
-  let tm = select(min(zl * rl, 150.), 45., dp < 1e-6); // open sky: only the dust near the eye
+  let tm = select(min(zl * rl, 150.), 0., dp < 1e-6); // open sky: no shafts (they streak)
   let ro = g.cam.xyz; let sx = g.sun.xyz;
   let dt = tm / ${RAYN}.;
   let j = ign(fc.xy);
