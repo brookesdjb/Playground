@@ -1,0 +1,7 @@
+Device: Apple M2 Pro
+
+tiny.mlpackage
+  ANE  median   4.09  p99   4.69  mean   4.12  max  16.30 ms  (n=500)
+  GPU  median   5.35  p99   6.61  mean   5.49  max   7.86 ms  (n=500)
+
+Check that every layer really ran on the ANE: open the .mlpackage in Xcode -> Performance -> Create Report (Neural Engine).

@@ -1,0 +1,13 @@
+Device: Apple M2 Pro
+GPU load calibrated to 9.99 ms per frame (131 iterations)
+
+GPU frame, load alone:            median   9.94  p99  10.92  mean  10.07  max  11.84 ms  (n=775)
+GPU frame, load + model on ANE: median   9.94  p99  11.92  mean  10.23  max  12.39 ms  (n=762)
+  model latency under load:       median   4.79  p99   7.08  mean   5.04  max  16.29 ms  (n=481)
+GPU frame, load + model on GPU: median  14.49  p99  19.80  mean  14.36  max  20.98 ms  (n=525)
+  model latency under load:       median   9.97  p99  24.57  mean  10.78  max  67.30 ms  (n=481)
+
+Summary for tiny.mlpackage (one inference per 60 Hz frame):
+  ANE: adds +0.00 ms to the GPU frame (median), +1.00 ms (p99); model p99 7.08 ms
+  GPU: adds +4.55 ms to the GPU frame (median), +8.89 ms (p99); model p99 24.57 ms
+  The ANE pays off if its p99 fits the budget (~8 ms with one frame of pipelining) and it adds clearly less GPU time than the GPU run.

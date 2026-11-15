@@ -1,0 +1,4 @@
+step 1000/20000  L1 0.0089  97 ms/step
+step 10000/20000  L1 0.0081  45 ms/step
+step 20000/20000  L1 0.0081  39 ms/step
+saved runs/tiny.pt - convert it for the benchmark with: python convert.py tiny --ckpt runs/tiny.pt

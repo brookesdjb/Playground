@@ -44,9 +44,11 @@ for d in a.data:
     train += pairs[:-k]; test += pairs[-k:]
 print(f"{len(train)} training pairs, {len(test)} test pairs, device {dev}")
 cache = {}
-def pair(lo_p, hi_p):  # images stay in memory after the first use
+def load_u8(p):
+    return torch.from_numpy(np.asarray(Image.open(p).convert("RGB"), dtype=np.uint8).copy()).permute(2, 0, 1)
+def pair(lo_p, hi_p):  # images stay in memory after the first use, as uint8 (float32 for 540 pairs is ~30 GB)
     if lo_p not in cache:
-        cache[lo_p] = (load(lo_p), load(hi_p))
+        cache[lo_p] = (load_u8(lo_p), load_u8(hi_p))
     return cache[lo_p]
 
 
@@ -58,7 +60,7 @@ def batch():
         y0, x0 = random.randrange(h - c + 1), random.randrange(w - c + 1)
         x, y = lo[:, y0:y0 + c, x0:x0 + c], hi[:, 2 * y0:2 * (y0 + c), 2 * x0:2 * (x0 + c)]
         if random.random() < 0.5: x, y = x.flip(2), y.flip(2)
-        xs.append(x); ys.append(y)
+        xs.append(x.float() / 255); ys.append(y.float() / 255)
     return torch.stack(xs).to(dev), torch.stack(ys).to(dev)
 
 
